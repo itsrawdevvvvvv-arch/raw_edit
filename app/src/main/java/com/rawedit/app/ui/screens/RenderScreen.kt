@@ -274,8 +274,8 @@ fun RenderScreen(
 private fun estimateText(progress: Float, startedAt: Long): String {
     if (startedAt <= 0L || progress <= 0.03f || progress >= 1f) return ""
     val elapsed = System.currentTimeMillis() - startedAt
-    val total = elapsed / progress
-    val left = ((total - elapsed) / 1000L).coerceAtLeast(0L)
+    val totalMs = elapsed.toFloat() / progress
+    val left = ((totalMs - elapsed).toLong() / 1000L).coerceAtLeast(0L)
     if (left < 5) return ""
     val mins = left / 60
     val secs = left % 60

@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -92,6 +93,8 @@ fun CreateScreen(
     var copied by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickError by remember { mutableStateOf<String?>(null) }
+    val density = LocalDensity.current
+    val stepShift = with(density) { 24.dp.roundToPx() }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -161,7 +164,7 @@ fun CreateScreen(
                 targetState = step,
                 transitionSpec = {
                     val forward = targetState > initialState
-                    val shift = 24.dp.roundToPx()
+                    val shift = stepShift
                     val enter = slideInHorizontally(
                         animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
                     ) { if (forward) shift else -shift } +

@@ -123,7 +123,7 @@ fun EditorScreen(vm: CreateViewModel, onBack: () -> Unit, onDone: () -> Unit) {
         if (list.isNotEmpty()) {
             vm.setLayers(list, recordHistory = false)
         }
-        val d = s.durationSeconds()
+        val d = s.probe().duration
         if (d > 0) time = 0f
         s.seek(0.0)
         loading = false

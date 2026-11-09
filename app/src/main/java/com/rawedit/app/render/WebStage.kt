@@ -4,8 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.os.Choreographer
 import android.os.SystemClock
+import android.view.Choreographer
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
