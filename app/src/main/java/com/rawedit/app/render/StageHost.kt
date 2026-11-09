@@ -3,6 +3,7 @@ package com.rawedit.app.render
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.View
+import android.webkit.WebView
 import android.widget.FrameLayout
 
 /**

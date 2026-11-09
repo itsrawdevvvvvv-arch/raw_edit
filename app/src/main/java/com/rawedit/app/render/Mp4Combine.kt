@@ -43,12 +43,12 @@ object Mp4Combine {
             while (vPts >= 0 || aPts >= 0) {
                 val useVideo = vPts >= 0 && (aPts < 0 || vPts <= aPts)
                 if (useVideo) {
-                    info.set(0, vEx.sampleSize, vPts, mapFlags(vEx.sampleFlags))
+                    info.set(0, vEx.sampleSize.toInt(), vPts, mapFlags(vEx.sampleFlags))
                     vBuf.position(0)
                     m.writeSampleData(vTrackOut, vBuf, info)
                     vPts = readSample(vEx, vBuf)
                 } else {
-                    info.set(0, aEx.sampleSize, aPts, mapFlags(aEx.sampleFlags))
+                    info.set(0, aEx.sampleSize.toInt(), aPts, mapFlags(aEx.sampleFlags))
                     aBuf.position(0)
                     m.writeSampleData(aTrackOut, aBuf, info)
                     aPts = readSample(aEx, aBuf)

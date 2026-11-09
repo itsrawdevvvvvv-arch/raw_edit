@@ -5,7 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
-import android.os.Choreographer
+import android.view.Choreographer
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
