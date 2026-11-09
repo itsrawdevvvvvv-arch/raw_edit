@@ -62,3 +62,26 @@ these remain unproven:
 
 If a render fails now, the screen names the stage that failed. That message is what I need to
 fix it properly.
+
+## 1.3.0
+
+Two failures reported from a real device, both fixed.
+
+**"The code loaded but seek(0) failed."** The pasted HTML was valid. I ran it in headless
+Chromium here: `window.RAW` present, `seek` is a function, 83 layers, `seek(0)` returns true in
+7 ms, 30 seeks in 850 ms. The bug was mine: the first seek ran once behind a 4 second timeout and
+any miss was fatal. The first seek also builds the whole DOM, so a slow phone can exceed it.
+Now the warm-up runs up to three times, never blocks the render, and the frame loop plus the
+blank-frame watchdog decide whether the page actually works. JS timeouts went from 4 s to 8 s.
+
+**"Couldn't read the voice file."** The picked file was a WAV. The old transcoder only handled
+compressed audio through a MediaCodec decoder, and raw PCM has no decoder on many devices.
+`AudioTranscoder` is rewritten with four routes, tried in order:
+1. track is already AAC - remux the samples, no re-encode;
+2. track is raw PCM (WAV) - feed straight to the AAC encoder, no decoder;
+3. anything else (MP3, M4A, OGG) - decode, then encode;
+4. MediaExtractor refuses the file - a hand-written RIFF/WAVE parser that handles PCM 8/16/24/32
+   bit and 32 bit float, mono or stereo, and encodes it itself.
+
+The error message is now "Pick the audio again, or convert it to MP3" rather than implying the
+format was wrong.
