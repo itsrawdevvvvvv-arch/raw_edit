@@ -1,65 +1,98 @@
-# Status report
+# raw_edit 1.1.0 - fix pass
 
-Built by CI on GitHub Actions (run 42625854662, 2026-11-09). Debug and release APKs both
-assembled successfully; `app-debug.apk` is 20.6 MB, v2-signed with the debug key.
+## Root cause of "rendering never completes"
 
-No Android device or emulator was available in the build environment, so anything that needs a
-running phone is marked **not verified**, not "pass".
+Two defects compounded, and together they produced exactly what the recording shows: a black
+preview, progress frozen at 2%, then a silent return to the form.
 
-## What the build proved
+1. **`evaluateJavascript` was awaited with no timeout.** `WebStage.load()` called a helper that
+   suspended on `suspendCancellableCoroutine` and waited for the WebView callback. If that
+   callback never fired - page not painted yet, WebView not laid out, renderer not ready - the
+   coroutine suspended forever. The 20 second deadline was only checked *between* calls, so it
+   was never reached. Progress therefore never left the initial 2%.
 
-| Item | Result |
-| --- | --- |
-| Project configures and compiles (Kotlin 2.0.21, AGP 8.5.2, Compose) | Pass |
-| Resources, manifest and adaptive icon merge | Pass |
-| Debug APK assembles and is signed | Pass |
-| Release APK assembles (signed with debug key, no release keystore given) | Pass |
-| Fonts bundled in the APK (`assets/fonts/Montserrat-Bold.ttf`, `OpenSans-Regular.ttf`) | Pass |
-| Package `com.rawedit.app`, versionName 1.0.0, minSdk 24, targetSdk 34 | Pass |
-| No `INTERNET` permission | Pass |
+2. **Cancellation was treated as "user cancelled".** The render effect caught
+   `CancellationException` and called `onCancel()`, which popped the screen. The effect was keyed
+   on the WebView host, so any restart of that effect cancelled the running job and silently
+   navigated back to the form - no error, no video, nothing in My videos.
 
-## Testing checklist from the brief
+Both are fixed. Every JS call now has a hard timeout (`withTimeoutOrNull`), every stage is wrapped
+in try/catch with a specific message, and the screen only leaves on an explicit user cancel.
 
-| Item | Result |
-| --- | --- |
-| Audio picker works and shows name and duration | Not verified on a device (code review only) |
-| Next is disabled until the audio and style are chosen | Not verified (logic reviewed) |
-| Prompt contains style, file name and the RAW contract; Copy works | Prompt content reviewed; copy is not verified |
-| Invalid code shows a friendly error; valid code starts rendering | Validator logic reviewed; not verified |
-| Rendering shows real progress; Cancel works | Not verified |
-| Output is a playable 1920x1080 MP4 with audio in sync | Not verified - this is the highest-risk path |
-| Save to phone and Share work | Not verified |
-| Library lists, plays and deletes videos | Not verified |
-| Animations run smoothly; reduce-motion respected | Not verified |
-| Layout fine on small and large phones | Not verified |
+## What changed
 
-## Changes from the original brief
+Rendering:
+- `WebStage` rewritten: timeouts on load, probe, seek, layer read and layer write; a structured
+  `probe()` reporting `window.RAW`, `seek`, `layers`, `#stage` and duration.
+- `RenderEngine` rewritten: real stages (Reading code, Preparing voice, Rendering frame N of M,
+  Encoding, Saving poster, Muxing audio, Done), progress derived from frames completed, a
+  resolution fallback chain 1080p to 720p to 480p, `OutOfMemoryError` caught and retried lower,
+  even frame dimensions, and a friendly `RenderException` per failure.
+- `VideoEncoder`: retries with the Baseline H.264 profile when the default profile is rejected.
+- `RenderService`: a foreground service with a progress notification, so Android does not kill the
+  render when the app is backgrounded or the screen is recorded.
+- Live preview: the WebView stays laid out and visible, and the current frame is drawn over it.
+- Cancel cleans up temp files; Retry and Back to code are offered on every failure.
 
-- **Rendering moved on-device.** The brief specified an online render server (Playwright +
-  FFmpeg in Docker, hosted free). The app now renders on the phone: the WebView is driven frame
-  by frame through `RAW.seek(t)`, frames go to MediaCodec (H.264), the voiceover is decoded and
-  re-encoded to AAC, and MediaMuxer joins them. There is no `raw_edit_server` repository and no
-  server URL, because nothing is uploaded anywhere.
-- **No Room.** The video library is a small JSON file plus a `StateFlow`; settings and drafts use
-  `SharedPreferences`. This keeps the build free of KSP/annotation processing.
-- **Long-press on a library row** was replaced by explicit Share and Delete buttons, which are
-  easier to hit on a phone.
-- **Pinch-to-resize** is implemented as a two-finger gesture on the preview; there is also a size
-  slider in the layer panel.
-- `ACCESS_NETWORK_STATE` is merged into the manifest by an AndroidX library. It only reports
-  connectivity state; it does not grant network access, and the app still declares no `INTERNET`
-  permission.
+Validation (before rendering, on the paste step): checks for an HTML document, `window.RAW`,
+`seek(t)` and a `layers` list, with an inline message under the box.
 
-## Known risk
+UI:
+- Bottom nav no longer covers content: `NavBottomSpacer()` adds nav height + the system
+  navigation-bar inset on every scrolling screen.
+- Nav pill no longer clips: the pill background is painted with a shape instead of clipping its
+  children, and the width animates with `animateContentSize`, so the label never truncates.
+- Home: the profile card no longer carries a rotation transform.
+- Step 4: fixed layout with an internally scrolling code box, `imePadding`, and `adjustResize`,
+  so the keyboard cannot shift the page.
+- Back gesture: `BackHandler` steps back through the wizard and exits from Home.
 
-The on-device renderer is the part most likely to need a fix on real hardware. Three specific
-things could not be proven without a device:
+Motion:
+- One system in `MotionSpec`: 100 ms press, 150 ms small, 220 ms screen, 300 ms overlay cap;
+  decelerate on enter, accelerate on exit.
+- Step flow: 24 dp horizontal slide plus fade, direction-aware.
+- Tab switch: fade-through with a 0.98 scale, animating only opacity and transform.
+- Render screen: fully opaque, blocks touches underneath, nav hidden.
+- Progress updates throttled to 4 per second while rendering.
 
-1. Whether `WebView.draw(Canvas)` returns the freshly sought frame on every OEM WebView build
-   (it depends on software-layer behaviour).
-2. Whether the chosen hardware encoder accepts `COLOR_FormatYUV420Flexible` input images on every
-   SoC; there is a fallback to NV12/I420 buffers if it does not.
-3. Frame-accurate audio/video duration matching after muxing.
+Low-end (Android 9, 2 GB):
+- `minSdk` 28, R8 and resource shrinking on release.
+- Fast mode defaults on and is forced on `isLowRamDevice` or under 3 GB RAM; 24 fps on low-end,
+  30 fps otherwise; 720p and 480p fallbacks.
+- Single reused capture bitmap, no per-frame allocation, bitmaps recycled.
 
-Speed: a 1 minute video at 1080p involves 1800 frames; expect several minutes on a mid-range
-phone. The 720p "Fast mode" toggle roughly halves the encode work.
+## Files changed
+
+```
+app/build.gradle.kts
+app/proguard-rules.pro
+app/src/main/AndroidManifest.xml
+app/src/main/res/drawable/ic_stat_render.xml          (new)
+app/src/main/java/com/rawedit/app/MainActivity.kt
+app/src/main/java/com/rawedit/app/service/RenderService.kt   (new)
+app/src/main/java/com/rawedit/app/render/WebStage.kt
+app/src/main/java/com/rawedit/app/render/RenderEngine.kt
+app/src/main/java/com/rawedit/app/render/VideoEncoder.kt
+app/src/main/java/com/rawedit/app/render/CodeValidator.kt
+app/src/main/java/com/rawedit/app/ui/theme/MotionSpec.kt      (new)
+app/src/main/java/com/rawedit/app/ui/components/Components.kt
+app/src/main/java/com/rawedit/app/ui/screens/RenderScreen.kt
+app/src/main/java/com/rawedit/app/ui/screens/CreateScreen.kt
+app/src/main/java/com/rawedit/app/ui/screens/HomeScreen.kt
+app/src/main/java/com/rawedit/app/ui/screens/EditorScreen.kt
+app/src/main/java/com/rawedit/app/ui/nav/AppNav.kt
+app/src/main/java/com/rawedit/app/viewmodel/CreateViewModel.kt
+```
+
+## Honest status
+
+Compiled and packaged by CI. **Not run on a device or emulator** - none is available in this
+environment, so the acceptance checks in the brief (render time on an API 28 2 GB emulator, jank
+percentage, four API levels) could not be executed. What is proven is that the code compiles,
+both APKs build, and the specific failure modes above are fixed at the source level.
+
+Unverified and worth watching on a real phone:
+1. Whether `WebView.draw(Canvas)` returns the freshly sought frame on every OEM WebView.
+2. Whether the hardware encoder accepts `COLOR_FormatYUV420Flexible` (there is an NV12/I420
+   fallback, and a Baseline-profile retry).
+3. Audio/video duration matching after muxing.
