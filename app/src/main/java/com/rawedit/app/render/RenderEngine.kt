@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
+import com.rawedit.app.util.RenderLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -51,7 +52,8 @@ class RenderEngine(
         layersJson: String?,
         onStage: (String) -> Unit,
         onProgress: (Float) -> Unit,
-        onPreview: (Bitmap) -> Unit
+        onPreview: (Bitmap) -> Unit,
+        selfTest: Boolean = false
     ): Result = withContext(Dispatchers.Main) {
         val startedAt = SystemClock.uptimeMillis()
         val workDir = File(context.filesDir, "renders/tmp").apply { mkdirs() }
@@ -66,7 +68,10 @@ class RenderEngine(
             // ---- stage 1: read the code ----
             onStage("Reading code")
             onProgress(0.02f)
-            if (!stage.load(code)) {
+            RenderLog.log("render start, selfTest=$selfTest, stage=" + stageWidth + "x" + stageHeight + ", fps=$fps")
+            val loaded = stage.load(code)
+            RenderLog.log("load returned $loaded")
+            if (!loaded) {
                 val probe = stage.probe()
                 throw RenderException(
                     when {
@@ -91,10 +96,16 @@ class RenderEngine(
 
             // ---- stage 2: voice ----
             onStage("Preparing voice")
-            val audioOk = withContext(Dispatchers.IO) {
-                AudioTranscoder(context).transcode(audioUri, tempAudio)
+            val audioOk = if (selfTest) {
+                RenderLog.log("self test: skipping audio")
+                false
+            } else {
+                withContext(Dispatchers.IO) {
+                    AudioTranscoder(context).transcode(audioUri, tempAudio)
+                }
             }
-            if (!audioOk) {
+            RenderLog.log("audio transcoded=$audioOk")
+            if (!audioOk && !selfTest) {
                 throw RenderException(
                     "Couldn't read the voice file. Pick the audio again, or convert it to MP3."
                 )
@@ -113,6 +124,7 @@ class RenderEngine(
             for ((requestedW, requestedH) in attempts) {
                 val w = requestedW - (requestedW % 2)
                 val h = requestedH - (requestedH % 2)
+                RenderLog.log("trying encoder at " + w + "x" + h)
                 try {
                     onStage(if (w == requestedW) "Preparing frames" else "Retrying at ${h}p")
                     val (frames, fpsUsed) = encodeFrames(w, h, tempVideo, onStage, onProgress, onPreview)
@@ -128,8 +140,13 @@ class RenderEngine(
                     onStage("Muxing audio")
                     onProgress(0.96f)
                     val combined = withContext(Dispatchers.IO) {
-                        Mp4Combine.combine(tempVideo, tempAudio, outFile)
+                        if (selfTest || !tempAudio.exists() || tempAudio.length() == 0L) {
+                            Mp4Combine.copyVideo(tempVideo, outFile)
+                        } else {
+                            Mp4Combine.combine(tempVideo, tempAudio, outFile)
+                        }
                     }
+                    RenderLog.log("mux combined=$combined out=" + outFile.length())
                     if (!combined || !outFile.exists() || outFile.length() < 1024) {
                         throw RenderException("The video could not be finished. Try a shorter voiceover.")
                     }
@@ -146,10 +163,12 @@ class RenderEngine(
                 } catch (c: CancellationException) {
                     throw c
                 } catch (oom: OutOfMemoryError) {
+                    RenderLog.log("encoder OOM at " + w + "x" + h)
                     lastError = oom
                     encoder?.release()
                     encoder = null
                 } catch (t: Throwable) {
+                    RenderLog.log("encoder failed at " + w + "x" + h, t)
                     lastError = t
                     encoder?.release()
                     encoder = null
@@ -164,6 +183,7 @@ class RenderEngine(
             outFile.delete()
             throw c
         } catch (t: Throwable) {
+            RenderLog.log("render failed", t)
             encoder?.release()
             outFile.delete()
             throw t
@@ -225,6 +245,15 @@ class RenderEngine(
                     Canvas(scaled).drawBitmap(capture, null, dst, paint)
                     scaled
                 }
+                if (i < 3 && isBlank(capture)) {
+                    RenderLog.log("frame " + i + " captured fully black")
+                    if (i == 2) {
+                        throw RenderException(
+                            "This phone's WebView returned a black frame, so the video " +
+                                "cannot be drawn here. Tap Share log and send it over."
+                        )
+                    }
+                }
                 if (i % 15 == 0) {
                     sampled++
                     if (isBlank(capture)) blank++
@@ -247,6 +276,7 @@ class RenderEngine(
             }
             onStage("Encoding")
             ve.finish()
+            RenderLog.log("frames encoded=" + totalFrames + " at " + width + "x" + height)
             if (sampled > 4 && blank * 100 / sampled > 90) {
                 throw RenderException(
                     "Every frame came out black. This phone's WebView couldn't draw the code. " +

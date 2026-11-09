@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920, initial-scale=1">
+<style>
+html,body{margin:0;padding:0;overflow:hidden;background:#101820}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#101820;transform-origin:0 0}
+.el{position:absolute;box-sizing:border-box}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+(function(){
+  var stage=document.getElementById('stage');
+  var layers=[
+    {id:'bg',name:'Background',type:'shape',x:0,y:0,w:1920,h:1080,opacity:1,z:0,start:0,end:9,fill:'#101820'},
+    {id:'bar',name:'Bar',type:'shape',x:160,y:700,w:1600,h:90,opacity:1,z:1,start:0,end:9,fill:'#F0C986'},
+    {id:'txt',name:'Title',type:'text',x:0,y:380,w:1920,h:200,opacity:1,z:2,start:0,end:9,
+     text:'SELF TEST',size:170,color:'#FFFFFF',font:'M',align:'center'}
+  ];
+  var els={};
+  function el(L){
+    if(els[L.id])return els[L.id];
+    var d=document.createElement('div');
+    d.className='el';
+    if(L.type==='text'){
+      d.style.display='flex';
+      d.style.alignItems='center';
+      d.style.justifyContent='center';
+      d.style.fontFamily='Montserrat,sans-serif';
+      d.style.fontWeight='800';
+      d.style.fontSize=(L.size||100)+'px';
+      d.style.color=L.color||'#fff';
+      d.textContent=L.text||'';
+    }
+    stage.appendChild(d);
+    els[L.id]=d;
+    return d;
+  }
+  function seek(t){
+    t=+t; if(!isFinite(t)) t=0;
+    var ls=(window.RAW&&window.RAW.layers)||layers;
+    for(var i=0;i<ls.length;i++){
+      var L=ls[i], d=el(L);
+      if(t<L.start||t>L.end||(L.opacity||0)<=0){d.style.display='none';continue;}
+      d.style.display=(L.type==='text')?'flex':'block';
+      d.style.left=L.x+'px'; d.style.top=L.y+'px';
+      d.style.width=L.w+'px'; d.style.height=L.h+'px';
+      d.style.opacity=(L.opacity==null?1:L.opacity);
+      d.style.zIndex=(L.z|0);
+      if(L.type!=='text') d.style.background=L.fill||'#fff';
+      if(L.id==='bar') d.style.width=(L.w*(0.2+0.7*(t/9))).toFixed(0)+'px';
+    }
+    return true;
+  }
+  window.RAW={duration:9,width:1920,height:1080,layers:layers,seek:seek};
+  try{seek(0);}catch(e){}
+})();
+</script>
+</body>
+</html>

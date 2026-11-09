@@ -10,6 +10,40 @@ import java.nio.ByteBuffer
 /** Joins a video-only MP4 and an audio-only MP4 into one file, without re-encoding. */
 object Mp4Combine {
 
+    /** Video only: used by the self test, which has no audio. */
+    fun copyVideo(videoFile: File, outFile: File): Boolean {
+        var muxer: MediaMuxer? = null
+        var ex: MediaExtractor? = null
+        return try {
+            ex = MediaExtractor().apply { setDataSource(videoFile.absolutePath) }
+            val trackIn = firstTrack(ex, "video/")
+            if (trackIn < 0) return false
+            ex.selectTrack(trackIn)
+            val m = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = m
+            val trackOut = m.addTrack(ex.getTrackFormat(trackIn))
+            m.start()
+            val buf = ByteBuffer.allocateDirect(1 shl 22)
+            val info = MediaCodec.BufferInfo()
+            while (true) {
+                buf.clear()
+                val size = ex.readSampleData(buf, 0)
+                if (size < 0) break
+                info.set(0, size, ex.sampleTime, mapFlags(ex.sampleFlags))
+                buf.position(0)
+                m.writeSampleData(trackOut, buf, info)
+                ex.advance()
+            }
+            true
+        } catch (t: Throwable) {
+            false
+        } finally {
+            runCatching { muxer?.stop() }
+            runCatching { muxer?.release() }
+            runCatching { ex?.release() }
+        }
+    }
+
     fun combine(videoFile: File, audioFile: File, outFile: File): Boolean {
         var muxer: MediaMuxer? = null
         var vEx: MediaExtractor? = null
