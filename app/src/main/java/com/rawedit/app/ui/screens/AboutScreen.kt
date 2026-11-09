@@ -114,7 +114,14 @@ fun AboutScreen(
             Spacer(Modifier.height(6.dp))
             SettingRow("Name", name) { onProfile() }
             SettingRow("Profile photo", "Change") { onProfile() }
-            SettingRow("Server", prettyHost(prefs.serverUrl)) { showServer = true }
+            SettingRow(
+                "Render server",
+                if (com.rawedit.app.net.ServerConfig.isPlaceholder(prefs.serverUrl)) {
+                    "Off - this phone"
+                } else {
+                    prettyHost(prefs.serverUrl)
+                }
+            ) { showServer = true }
             SettingRow("Clear cache", "Free space") { onClearCache() }
             if (cacheMessage != null) {
                 Spacer(Modifier.height(8.dp))
@@ -139,7 +146,9 @@ fun AboutScreen(
             text = {
                 Column {
                     Text(
-                        "Paste the address of your raw_edit_server, for example http://203.0.113.10:7860",
+                        "Leave this empty to draw the frames on this phone. " +
+                            "If you run raw_edit_server somewhere, paste its address, " +
+                            "for example http://203.0.113.10:7860",
                         color = Ink.Muted,
                         fontSize = 12.sp
                     )
