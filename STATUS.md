@@ -1,98 +1,64 @@
-# raw_edit 1.1.0 - fix pass
+# raw_edit 1.2.0
 
-## Root cause of "rendering never completes"
+## Why the update failed
 
-Two defects compounded, and together they produced exactly what the recording shows: a black
-preview, progress frozen at 2%, then a silent return to the form.
+Every CI run generated a fresh debug keystore, so each APK was signed with a different key.
+Android refuses to update an app whose signing certificate changed.
 
-1. **`evaluateJavascript` was awaited with no timeout.** `WebStage.load()` called a helper that
-   suspended on `suspendCancellableCoroutine` and waited for the WebView callback. If that
-   callback never fired - page not painted yet, WebView not laid out, renderer not ready - the
-   coroutine suspended forever. The 20 second deadline was only checked *between* calls, so it
-   was never reached. Progress therefore never left the initial 2%.
+A keystore is now committed at `keystore/raw_edit.jks` and both the debug and the release build
+type sign with it (`signingConfigs { create("stable") }`). Verified: the debug and release APKs of
+1.2.0 carry the same certificate (SHA-256 prefix 978711c060b59770), so every future build installs
+as an update.
 
-2. **Cancellation was treated as "user cancelled".** The render effect caught
-   `CancellationException` and called `onCancel()`, which popped the screen. The effect was keyed
-   on the WebView host, so any restart of that effect cancelled the running job and silently
-   navigated back to the form - no error, no video, nothing in My videos.
+**One time only:** the versions installed so far (1.0.0, 1.1.0) were signed with the old
+throwaway key. Uninstall the app once, then install 1.2.0. Every update after that installs
+normally over the previous one.
 
-Both are fixed. Every JS call now has a hard timeout (`withTimeoutOrNull`), every stage is wrapped
-in try/catch with a specific message, and the screen only leaves on an explicit user cancel.
+## What the screen recording showed, and what changed
 
-## What changed
+| Seen in the recording | Fix |
+| --- | --- |
+| Step 3 drew "Pick a style" and "Copy your prompt" on top of each other, prompt text bleeding through the style cards | The step transition used a cross-fade, so both steps were composed and drawn together. The outgoing step is now removed instantly (`ExitTransition.None`) and only the new step slides in |
+| The white Next button sat underneath the floating nav pill on every step | Added `NavPillClearance()` (84 dp + gesture inset) to the wizard footer |
+| The audio filename overflowed the dashed drop area and was cut at both edges | Name is now 2 lines maximum, centred, ellipsised, with horizontal padding |
+| Home scrolled under the status bar and clipped "Creator!" | The device reports a zero status-bar inset under edge-to-edge. Every screen now applies `rememberTopInset()`, which falls back to 28 dp when the system reports less than 8 dp. The inset is applied before the scroll modifier so scrolled content clips at the boundary |
+| The prompt box cut a line in half at its bottom edge | Trailing 14 dp inside the scrolling text |
+| About screen text clipped at the very bottom | `navigationBarsPadding()` plus a larger trailing spacer |
+| Lag across the app | See below |
 
-Rendering:
-- `WebStage` rewritten: timeouts on load, probe, seek, layer read and layer write; a structured
-  `probe()` reporting `window.RAW`, `seek`, `layers`, `#stage` and duration.
-- `RenderEngine` rewritten: real stages (Reading code, Preparing voice, Rendering frame N of M,
-  Encoding, Saving poster, Muxing audio, Done), progress derived from frames completed, a
-  resolution fallback chain 1080p to 720p to 480p, `OutOfMemoryError` caught and retried lower,
-  even frame dimensions, and a friendly `RenderException` per failure.
-- `VideoEncoder`: retries with the Baseline H.264 profile when the default profile is rejected.
-- `RenderService`: a foreground service with a progress notification, so Android does not kill the
-  render when the app is backgrounded or the screen is recorded.
-- Live preview: the WebView stays laid out and visible, and the current frame is drawn over it.
-- Cancel cleans up temp files; Retry and Back to code are offered on every failure.
+## Lag work
 
-Validation (before rendering, on the paste step): checks for an HTML document, `window.RAW`,
-`seek(t)` and a `layers` list, with an inline message under the box.
+- The hero dot grid drew about 1200 circles on every scroll frame. It is now one tiled
+  `BitmapShader`, drawn once per size.
+- The progress bar ran an infinite shimmer animation, which invalidated and redrew the bar every
+  frame for the whole render. It is a plain fill now.
+- Tab transitions animated a scale on the full screen, forcing an offscreen render of the entire
+  hierarchy each frame. They are fade-only now (150 ms in, 90 ms out).
+- The upload icon's float animation was read during composition, recomposing the whole step each
+  frame. It now animates on the render layer (`graphicsLayer`) with no recomposition.
+- The editor pushed every drag delta to the WebView. It debounces 60 ms now.
+- The render stage is built at the output resolution (1280x720 in Fast mode) instead of always
+  1920x1080 and downscaling, which removes a full-size WebView draw per frame.
 
-UI:
-- Bottom nav no longer covers content: `NavBottomSpacer()` adds nav height + the system
-  navigation-bar inset on every scrolling screen.
-- Nav pill no longer clips: the pill background is painted with a shape instead of clipping its
-  children, and the width animates with `animateContentSize`, so the label never truncates.
-- Home: the profile card no longer carries a rotation transform.
-- Step 4: fixed layout with an internally scrolling code box, `imePadding`, and `adjustResize`,
-  so the keyboard cannot shift the page.
-- Back gesture: `BackHandler` steps back through the wizard and exits from Home.
+## Render changes
 
-Motion:
-- One system in `MotionSpec`: 100 ms press, 150 ms small, 220 ms screen, 300 ms overlay cap;
-  decelerate on enter, accelerate on exit.
-- Step flow: 24 dp horizontal slide plus fade, direction-aware.
-- Tab switch: fade-through with a 0.98 scale, animating only opacity and transform.
-- Render screen: fully opaque, blocks touches underneath, nav hidden.
-- Progress updates throttled to 4 per second while rendering.
+- The stage is created at the render resolution, so the primary path needs no downscale.
+- `seek(0)` is validated before the loop; a throwing `seek` now reports itself instead of
+  producing a broken video.
+- A blank-frame watchdog samples every 15th frame; if more than 90% are pure black the render
+  fails with "Every frame came out black. This phone's WebView couldn't draw the code."
+- `domStorageEnabled` and `databaseEnabled` are on (local only, no network) because some
+  generated pages use localStorage and previously threw.
+- `useWideViewPort` and `loadWithOverviewMode` are set explicitly.
 
-Low-end (Android 9, 2 GB):
-- `minSdk` 28, R8 and resource shrinking on release.
-- Fast mode defaults on and is forced on `isLowRamDevice` or under 3 GB RAM; 24 fps on low-end,
-  30 fps otherwise; 720p and 480p fallbacks.
-- Single reused capture bitmap, no per-frame allocation, bitmaps recycled.
+## Still unverified
 
-## Files changed
-
-```
-app/build.gradle.kts
-app/proguard-rules.pro
-app/src/main/AndroidManifest.xml
-app/src/main/res/drawable/ic_stat_render.xml          (new)
-app/src/main/java/com/rawedit/app/MainActivity.kt
-app/src/main/java/com/rawedit/app/service/RenderService.kt   (new)
-app/src/main/java/com/rawedit/app/render/WebStage.kt
-app/src/main/java/com/rawedit/app/render/RenderEngine.kt
-app/src/main/java/com/rawedit/app/render/VideoEncoder.kt
-app/src/main/java/com/rawedit/app/render/CodeValidator.kt
-app/src/main/java/com/rawedit/app/ui/theme/MotionSpec.kt      (new)
-app/src/main/java/com/rawedit/app/ui/components/Components.kt
-app/src/main/java/com/rawedit/app/ui/screens/RenderScreen.kt
-app/src/main/java/com/rawedit/app/ui/screens/CreateScreen.kt
-app/src/main/java/com/rawedit/app/ui/screens/HomeScreen.kt
-app/src/main/java/com/rawedit/app/ui/screens/EditorScreen.kt
-app/src/main/java/com/rawedit/app/ui/nav/AppNav.kt
-app/src/main/java/com/rawedit/app/viewmodel/CreateViewModel.kt
-```
-
-## Honest status
-
-Compiled and packaged by CI. **Not run on a device or emulator** - none is available in this
-environment, so the acceptance checks in the brief (render time on an API 28 2 GB emulator, jank
-percentage, four API levels) could not be executed. What is proven is that the code compiles,
-both APKs build, and the specific failure modes above are fixed at the source level.
-
-Unverified and worth watching on a real phone:
-1. Whether `WebView.draw(Canvas)` returns the freshly sought frame on every OEM WebView.
-2. Whether the hardware encoder accepts `COLOR_FormatYUV420Flexible` (there is an NV12/I420
-   fallback, and a Baseline-profile retry).
+No device or emulator is available here, so the recording is the only evidence of behaviour and
+these remain unproven:
+1. Whether `WebView.draw(Canvas)` returns the freshly sought frame on this WebView build.
+2. Whether the hardware encoder accepts `COLOR_FormatYUV420Flexible` (NV12/I420 fallback and a
+   Baseline-profile retry exist).
 3. Audio/video duration matching after muxing.
+
+If a render fails now, the screen names the stage that failed. That message is what I need to
+fix it properly.
