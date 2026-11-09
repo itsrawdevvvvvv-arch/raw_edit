@@ -12,6 +12,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -139,14 +140,24 @@ class RenderEngine(
                     // ---- stage 5: mux ----
                     onStage("Muxing audio")
                     onProgress(0.96f)
+                    // Hard ceiling: the muxer must never be able to stall the render.
                     val combined = withContext(Dispatchers.IO) {
-                        if (selfTest || !tempAudio.exists() || tempAudio.length() == 0L) {
-                            Mp4Combine.copyVideo(tempVideo, outFile)
-                        } else {
-                            Mp4Combine.combine(tempVideo, tempAudio, outFile)
-                        }
+                        withTimeoutOrNull(180_000L) {
+                            if (selfTest || !tempAudio.exists() || tempAudio.length() == 0L) {
+                                Mp4Combine.copyVideo(tempVideo, outFile)
+                            } else {
+                                Mp4Combine.combine(tempVideo, tempAudio, outFile)
+                            }
+                        } ?: false
                     }
                     RenderLog.log("mux combined=$combined out=" + outFile.length())
+                    if (!combined) {
+                        throw RenderException(
+                            "The video was drawn but joining the audio timed out. " +
+                                "Try Fast mode or a shorter voiceover."
+                        )
+                    }
+                    onProgress(0.99f)
                     if (!combined || !outFile.exists() || outFile.length() < 1024) {
                         throw RenderException("The video could not be finished. Try a shorter voiceover.")
                     }
