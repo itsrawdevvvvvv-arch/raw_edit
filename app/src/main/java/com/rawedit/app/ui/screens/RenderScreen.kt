@@ -87,6 +87,28 @@ fun RenderScreen(
     val renderHeight = if (renderWidth == 1920) 1080 else 720
     val fps = if (vm.lowEndDevice) 24 else 30
 
+    fun finishVideo(file: File, stamp: Long, existingThumb: File? = null) {
+        val thumbFile = existingThumb
+            ?: File(File(context.filesDir, "thumbs").apply { mkdirs() }, "thumb_$stamp.png")
+        if (!thumbFile.exists()) Thumb.fromVideo(file.absolutePath, thumbFile)
+        VideoStore.get(context).add(
+            VideoItem(
+                id = stamp.toString(),
+                title = "Video " + (VideoStore.get(context).count() + 1),
+                style = vm.style?.label ?: "Motion Graphics",
+                durationMs = vm.audioDurationMs,
+                filePath = file.absolutePath,
+                thumbPath = if (thumbFile.exists()) thumbFile.absolutePath else ""
+            )
+        )
+        vm.lastVideoPath = file.absolutePath
+        vm.lastThumbPath = thumbFile.absolutePath
+        vm.lastDurationMs = vm.audioDurationMs
+        progress = 1f
+        stageText = "Done"
+        onFinished()
+    }
+
     // ---- server path -------------------------------------------------------
 
     suspend fun renderOnServer(audioUri: Uri) {
@@ -177,28 +199,6 @@ fun RenderScreen(
             onPreview = { bmp -> preview = bmp }
         )
         finishVideo(result.video, System.currentTimeMillis(), result.thumb)
-    }
-
-    fun finishVideo(file: File, stamp: Long, existingThumb: File? = null) {
-        val thumbFile = existingThumb
-            ?: File(File(context.filesDir, "thumbs").apply { mkdirs() }, "thumb_$stamp.png")
-        if (!thumbFile.exists()) Thumb.fromVideo(file.absolutePath, thumbFile)
-        VideoStore.get(context).add(
-            VideoItem(
-                id = stamp.toString(),
-                title = "Video " + (VideoStore.get(context).count() + 1),
-                style = vm.style?.label ?: "Motion Graphics",
-                durationMs = vm.audioDurationMs,
-                filePath = file.absolutePath,
-                thumbPath = if (thumbFile.exists()) thumbFile.absolutePath else ""
-            )
-        )
-        vm.lastVideoPath = file.absolutePath
-        vm.lastThumbPath = thumbFile.absolutePath
-        vm.lastDurationMs = vm.audioDurationMs
-        progress = 1f
-        stageText = "Done"
-        onFinished()
     }
 
     fun shareLog() {
