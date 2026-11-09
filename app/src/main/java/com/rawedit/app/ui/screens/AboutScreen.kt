@@ -10,9 +10,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.rawedit.app.data.Prefs
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +45,11 @@ fun AboutScreen(
     onClearCache: () -> Unit
 ) {
     val topInset = rememberTopInset()
+    val context = LocalContext.current
+    val prefs = remember { Prefs.get(context) }
+    var showServer by remember { mutableStateOf(false) }
+    var serverUrl by remember { mutableStateOf(prefs.serverUrl) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -100,6 +114,7 @@ fun AboutScreen(
             Spacer(Modifier.height(6.dp))
             SettingRow("Name", name) { onProfile() }
             SettingRow("Profile photo", "Change") { onProfile() }
+            SettingRow("Server", prettyHost(prefs.serverUrl)) { showServer = true }
             SettingRow("Clear cache", "Free space") { onClearCache() }
             if (cacheMessage != null) {
                 Spacer(Modifier.height(8.dp))
@@ -115,6 +130,45 @@ fun AboutScreen(
             fontSize = 11.sp
         )
         Spacer(Modifier.height(56.dp))
+    }
+
+    if (showServer) {
+        AlertDialog(
+            onDismissRequest = { showServer = false },
+            title = { Text("Render server", color = Ink.Text) },
+            text = {
+                Column {
+                    Text(
+                        "Paste the address of your raw_edit_server, for example http://203.0.113.10:7860",
+                        color = Ink.Muted,
+                        fontSize = 12.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = serverUrl,
+                        onValueChange = { serverUrl = it },
+                        singleLine = true,
+                        label = { Text("Address") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    prefs.serverUrl = com.rawedit.app.net.ServerConfig.normalize(serverUrl)
+                    serverUrl = prefs.serverUrl
+                    showServer = false
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showServer = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+private fun prettyHost(url: String): String {
+    return url.replace("http://", "").replace("https://", "").let {
+        if (it.length > 22) it.take(22) + "..." else it
     }
 }
 

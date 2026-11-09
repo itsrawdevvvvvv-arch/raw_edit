@@ -17,6 +17,27 @@ class Prefs(context: Context) {
             sp.edit().putString("name", value.trim().ifEmpty { "Creator" }).apply()
         }
 
+    /** Render server address, editable in About > Server. */
+    var serverUrl: String
+        get() = sp.getString("server_url", com.rawedit.app.net.ServerConfig.BASE_URL)
+            ?: com.rawedit.app.net.ServerConfig.BASE_URL
+        set(value) {
+            sp.edit().putString("server_url", value).apply()
+        }
+
+    /** Random id used only for rate limiting. No personal data. */
+    var deviceId: String
+        get() {
+            val existing = sp.getString("device_id", null)
+            if (!existing.isNullOrBlank()) return existing
+            val fresh = com.rawedit.app.net.ServerConfig.newDeviceId()
+            sp.edit().putString("device_id", fresh).apply()
+            return fresh
+        }
+        set(value) {
+            sp.edit().putString("device_id", value).apply()
+        }
+
     var photoPath: String?
         get() = sp.getString("photo", null)
         set(value) {

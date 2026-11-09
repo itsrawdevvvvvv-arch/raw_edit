@@ -12,8 +12,8 @@ android {
         applicationId = "com.rawedit.app"
         minSdk = 28
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.3.3"
+        versionCode = 8
+        versionName = "2.0.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
