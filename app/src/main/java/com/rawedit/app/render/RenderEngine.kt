@@ -82,6 +82,7 @@ class RenderEngine(
                     }
                 )
             }
+            stage.fitStage()
             if (!layersJson.isNullOrBlank()) stage.writeLayers(layersJson)
             // Warm the page up. The first seek builds the DOM, so it can take a few
             // tries; a slow first call is not a broken page. The frame loop and the

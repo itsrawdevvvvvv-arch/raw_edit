@@ -11,6 +11,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.rawedit.app.util.RenderLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -142,6 +143,35 @@ class WebStage(private val context: Context, private val web: WebView) {
         web.invalidate()
         awaitFrame()
         ok != null && ok.trim().trim('"').startsWith("1")
+    }
+
+    /**
+     * Pages scale their stage to the window once, at parse time, when the WebView has
+     * not been laid out yet and reports innerWidth = 0. Their own guard then locks the
+     * stage at scale 1, and the capture shows only the top-left corner of the design.
+     *
+     * We re-run the fit ourselves once the page is ready: dispatch a resize so any
+     * handler the page registered fires, then set the transform from RAW.width/height.
+     */
+    suspend fun fitStage(): Boolean = withContext(Dispatchers.Main) {
+        val js = "(function(){try{" +
+            "try{window.dispatchEvent(new Event('resize'));}catch(e){}" +
+            "try{if(window.RAW&&typeof window.RAW.fit==='function')window.RAW.fit();}catch(e){}" +
+            "var st=document.getElementById('stage');" +
+            "var W=(window.RAW&&window.RAW.width)||1920,H=(window.RAW&&window.RAW.height)||1080;" +
+            "var iw=window.innerWidth,ih=window.innerHeight;" +
+            "var s=Math.min(iw/W,ih/H);if(!isFinite(s)||s<=0)s=1;" +
+            "if(st){st.style.transformOrigin='0 0';" +
+            "st.style.transform='translate('+((iw-W*s)/2).toFixed(2)+'px,'+((ih-H*s)/2).toFixed(2)+" +
+            "'px) scale('+s.toFixed(5)+')';}" +
+            "var r=st?st.getBoundingClientRect():{width:0,height:0};" +
+            "return JSON.stringify({iw:iw,ih:ih,s:+s.toFixed(4),w:Math.round(r.width),h:Math.round(r.height)});" +
+            "}catch(e){return '{}';}})()"
+        val out = evalJs(js, 4000)
+        RenderLog.log("fit stage: " + out)
+        web.invalidate()
+        awaitFrame()
+        out != null
     }
 
     suspend fun readLayers(): String = withContext(Dispatchers.Main) {

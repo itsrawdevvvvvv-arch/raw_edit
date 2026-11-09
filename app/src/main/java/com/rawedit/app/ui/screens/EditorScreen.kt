@@ -119,6 +119,7 @@ fun EditorScreen(vm: CreateViewModel, onBack: () -> Unit, onDone: () -> Unit) {
             loading = false
             return@LaunchedEffect
         }
+        s.fitStage()
         val raw = s.readLayers()
         val list = parseLayers(raw)
         if (list.isNotEmpty()) {
