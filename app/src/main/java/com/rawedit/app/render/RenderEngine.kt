@@ -77,10 +77,20 @@ class RenderEngine(
                 )
             }
             if (!layersJson.isNullOrBlank()) stage.writeLayers(layersJson)
-            if (!stage.seek(0.0)) {
-                throw RenderException(
-                    "The code loaded but seek(0) failed. Ask Claude to fix the seek(t) function."
-                )
+            // Warm the page up. The first seek builds the DOM, so it can take a few
+            // tries; a slow first call is not a broken page. The frame loop and the
+            // blank-frame watchdog decide whether the page really works.
+            var warmed = false
+            for (tryIndex in 0 until 4) {
+                if (stage.seek(0.0)) {
+                    warmed = true
+                    break
+                }
+                onStage("Warming up")
+            }
+            if (!warmed) {
+                // One more chance with a longer timeout before giving up.
+                warmed = stage.seek(0.0)
             }
             checkActive()
             onProgress(0.05f)
@@ -91,7 +101,9 @@ class RenderEngine(
                 AudioTranscoder(context).transcode(audioUri, tempAudio)
             }
             if (!audioOk) {
-                throw RenderException("Couldn't read the voice file. Try another MP3 or WAV.")
+                throw RenderException(
+                    "Couldn't read the voice file. Pick the audio again, or convert it to MP3."
+                )
             }
             checkActive()
             onProgress(0.09f)
@@ -197,9 +209,20 @@ class RenderEngine(
             var lastPreviewAt = 0L
             var lastFrameAt = SystemClock.uptimeMillis()
 
+            var failedSeeks = 0
             for (i in 0 until totalFrames) {
                 checkActive()
-                stage.seek(i.toDouble() / fps)
+                if (stage.seek(i.toDouble() / fps)) {
+                    failedSeeks = 0
+                } else {
+                    failedSeeks++
+                    if (failedSeeks > 25) {
+                        throw RenderException(
+                            "The code stopped responding at frame " + i + ". " +
+                                "seek(t) is throwing an error."
+                        )
+                    }
+                }
                 stage.drawTo(capture)
 
                 val frame = if (scaled == null) {

@@ -113,7 +113,7 @@ class WebStage(private val context: Context, private val web: WebView) {
     suspend fun probe(): Probe = withContext(Dispatchers.Main) { probeOnce() }
 
     private suspend fun probeOnce(): Probe {
-        val raw = evalJs(JS_PROBE, 2500) ?: return Probe()
+        val raw = evalJs(JS_PROBE, 4000) ?: return Probe()
         return try {
             val o = JSONObject(unquote(raw))
             Probe(
@@ -130,7 +130,7 @@ class WebStage(private val context: Context, private val web: WebView) {
 
     suspend fun seek(t: Double): Boolean = withContext(Dispatchers.Main) {
         if (!pageReady) return@withContext false
-        val ok = evalJs("(function(){try{window.RAW.seek($t);return '1';}catch(e){return '0';}})()", 4000)
+        val ok = evalJs("(function(){try{window.RAW.seek($t);return '1';}catch(e){return '0';}})()", 8000)
         web.invalidate()
         awaitFrame()
         ok != null && ok.contains("1")
