@@ -33,7 +33,9 @@ import com.rawedit.app.util.Thumb
 import com.rawedit.app.viewmodel.CreateViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -94,7 +96,7 @@ fun RenderScreen(
                 )
             }
             progress = 0.06f
-            checkActive()
+            ensureActive()
 
             // 2. copy the voice file out of the picker so the upload is a plain stream
             stageText = "Reading your voice file"
@@ -104,7 +106,7 @@ fun RenderScreen(
                 } ?: throw ServerException("Could not read the voice file. Pick it again.")
             }
             progress = 0.10f
-            checkActive()
+            ensureActive()
 
             // 3. upload
             stageText = "Uploading"
@@ -124,7 +126,7 @@ fun RenderScreen(
             var done = false
             val deadline = System.currentTimeMillis() + 40 * 60 * 1000
             while (System.currentTimeMillis() < deadline) {
-                checkActive()
+                ensureActive()
                 val s = api.status(id)
                 when (s.status) {
                     "queued" -> stageText = "Waiting in line"
@@ -206,12 +208,6 @@ fun RenderScreen(
             context.startActivity(Intent.createChooser(send, "Share render log"))
         } catch (t: Throwable) {
             errorMessage = (errorMessage ?: "") + "\nCould not share the log."
-        }
-    }
-
-    suspend fun checkActive() {
-        if (!kotlinx.coroutines.currentCoroutineContext().isActive) {
-            throw CancellationException("cancelled")
         }
     }
 
@@ -315,6 +311,10 @@ fun RenderScreen(
             Spacer(Modifier.height(26.dp))
         }
     }
+}
+
+private suspend fun ensureActive() {
+    if (!currentCoroutineContext().isActive) throw CancellationException("cancelled")
 }
 
 private fun estimateText(progress: Float, startedAt: Long): String {
