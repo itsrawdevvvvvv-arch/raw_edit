@@ -9,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -140,6 +141,7 @@ fun StepProgress(step: Int, total: Int = 4, modifier: Modifier = Modifier) {
 
 @Composable
 fun PillNav(current: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val motion = rememberMotionEnabled()
     val items = listOf(
         Triple("Home", Icons.Rounded.Home, 0),
         Triple("Create", Icons.Rounded.Add, 1),
@@ -155,40 +157,50 @@ fun PillNav(current: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier
     ) {
         items.forEach { (label, icon, index) ->
             val active = index == current
-            val width by animateDpAsState(
-                targetValue = if (active) 100.dp else 56.dp,
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 700f),
-                label = "navWidth"
-            )
-            Box(
+            // background(shape) paints the pill but never clips the label
+            Row(
                 modifier = Modifier
-                    .height(46.dp)
-                    .width(width)
-                    .clip(CircleShape)
-                    .background(if (active) Ink.Pill else Color.Transparent)
-                    .clickable { onSelect(index) },
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = label,
-                        tint = if (active) Ink.Text else Ink.Muted,
-                        modifier = Modifier.size(20.dp)
+                    .background(
+                        color = if (active) Ink.Pill else Color.Transparent,
+                        shape = CircleShape
                     )
-                    if (active) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = label,
-                            color = Ink.Text,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                    .clickable { onSelect(index) }
+                    .padding(horizontal = if (active) 18.dp else 17.dp, vertical = 12.dp)
+                    .animateContentSize(
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 900f)
+                    ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (active) Ink.Text else Ink.Muted,
+                    modifier = Modifier.size(20.dp)
+                )
+                if (active) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = label,
+                        color = Ink.Text,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
     }
+}
+
+/**
+ * Bottom space every scrollable screen needs so its last card clears the floating
+ * nav pill plus the system gesture bar on any device.
+ */
+@Composable
+fun NavBottomSpacer(extra: Dp = 0.dp) {
+    val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    Spacer(Modifier.height(96.dp + inset + extra))
 }
 
 @Composable

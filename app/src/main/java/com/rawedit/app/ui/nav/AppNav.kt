@@ -3,10 +3,10 @@ package com.rawedit.app.ui.nav
 import android.net.Uri
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
+import com.rawedit.app.ui.theme.MotionSpec
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -87,14 +87,24 @@ fun AppNav() {
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding(),
+            // Tab switch is a fade-through: old fades out fast, new fades in with a
+            // small scale. Only opacity and transform are animated.
             enterTransition = {
-                fadeIn(tween(280)) + slideInVertically(tween(280)) { it / 28 }
+                fadeIn(tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)) +
+                    scaleIn(
+                        initialScale = 0.98f,
+                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
+                    )
             },
-            exitTransition = { fadeOut(tween(220)) },
-            popEnterTransition = { fadeIn(tween(240)) },
-            popExitTransition = {
-                fadeOut(tween(220)) + slideOutVertically(tween(240)) { it / 28 }
-            }
+            exitTransition = { fadeOut(tween(90, easing = MotionSpec.Exit)) },
+            popEnterTransition = {
+                fadeIn(tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)) +
+                    scaleIn(
+                        initialScale = 0.98f,
+                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
+                    )
+            },
+            popExitTransition = { fadeOut(tween(90, easing = MotionSpec.Exit)) }
         ) {
             composable(ROUTE_HOME) {
                 HomeScreen(
@@ -136,7 +146,9 @@ fun AppNav() {
                             popUpTo(ROUTE_CREATE) { inclusive = true }
                         }
                     },
-                    onFailed = { nav.popBackStack() },
+                    onExitToCode = {
+                        if (nav.currentDestination?.route == ROUTE_RENDER) nav.popBackStack()
+                    },
                     onCancel = {
                         if (nav.currentDestination?.route == ROUTE_RENDER) nav.popBackStack()
                     }

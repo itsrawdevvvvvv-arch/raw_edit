@@ -2,11 +2,23 @@ package com.rawedit.app.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,7 +52,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -48,11 +60,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Canvas
 import com.rawedit.app.data.Style
 import com.rawedit.app.render.CodeValidator
 import com.rawedit.app.ui.components.MonoLabel
@@ -61,6 +72,7 @@ import com.rawedit.app.ui.components.RawCard
 import com.rawedit.app.ui.components.StepProgress
 import com.rawedit.app.ui.theme.Ink
 import com.rawedit.app.ui.theme.Mono
+import com.rawedit.app.ui.theme.MotionSpec
 import com.rawedit.app.util.AudioMeta
 import com.rawedit.app.util.Fmt
 import com.rawedit.app.util.rememberMotionEnabled
@@ -76,7 +88,7 @@ fun CreateScreen(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    var step by remember { mutableStateOf(1) }
+    var step by remember { mutableIntStateOf(1) }
     var copied by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickError by remember { mutableStateOf<String?>(null) }
@@ -94,9 +106,7 @@ fun CreateScreen(
             // some pickers do not grant persistable permission
         }
         val info = AudioMeta.read(context, uri)
-        if (info == null) {
-            pickError = "That file has no readable audio. Try another one."
-        } else if (info.durationMs <= 0L) {
+        if (info == null || info.durationMs <= 0L) {
             pickError = "That file has no readable audio. Try another one."
         } else {
             pickError = null
@@ -112,9 +122,14 @@ fun CreateScreen(
         }
     }
 
+    BackHandler(enabled = true) {
+        if (step > 1) step -= 1 else onBack()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .padding(horizontal = 18.dp)
     ) {
         Spacer(Modifier.height(14.dp))
@@ -124,9 +139,7 @@ fun CreateScreen(
                     .size(40.dp)
                     .clip(CircleShape)
                     .background(Ink.Raised)
-                    .clickable {
-                        if (step > 1) step -= 1 else onBack()
-                    },
+                    .clickable { if (step > 1) step -= 1 else onBack() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -141,60 +154,76 @@ fun CreateScreen(
         }
         Spacer(Modifier.height(16.dp))
         StepProgress(step = step)
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(18.dp))
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-        ) {
-            when (step) {
-                1 -> StepAudio(
-                    vm = vm,
-                    pickError = pickError,
-                    onPick = { picker.launch(arrayOf("audio/*")) }
-                )
-
-                2 -> StepStyle(vm = vm)
-                3 -> StepPrompt(
-                    vm = vm,
-                    copied = copied,
-                    onCopy = {
-                        clipboard.setText(AnnotatedString(vm.prompt()))
-                        copied = true
-                    },
-                    onOpenClaude = {
-                        try {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://claude.ai"))
-                            )
-                        } catch (t: Throwable) {
-                            error = "No browser found to open Claude."
-                        }
+        Box(Modifier.weight(1f)) {
+            AnimatedContent(
+                targetState = step,
+                transitionSpec = {
+                    val forward = targetState > initialState
+                    val shift = 24.dp.roundToPx()
+                    val enter = slideInHorizontally(
+                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
+                    ) { if (forward) shift else -shift } +
+                        fadeIn(tween(MotionSpec.SCREEN, easing = MotionSpec.Enter))
+                    val exit = slideOutHorizontally(
+                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Exit)
+                    ) { if (forward) -shift else shift } +
+                        fadeOut(tween(MotionSpec.SMALL, easing = MotionSpec.Exit))
+                    enter togetherWith exit
+                },
+                label = "step"
+            ) { current ->
+                when (current) {
+                    1 -> ScrollingStep {
+                        StepAudio(
+                            vm = vm,
+                            pickError = pickError,
+                            onPick = { picker.launch(arrayOf("audio/*")) }
+                        )
                     }
-                )
 
-                else -> StepCode(
-                    vm = vm,
-                    error = error,
-                    onError = { error = it },
-                    onOpenEditor = onOpenEditor,
-                    onPaste = {
-                        val text = clipboard.getText()?.text
-                        if (text.isNullOrBlank()) {
-                            error = "Nothing to paste. Copy the code from Claude first."
-                        } else {
-                            vm.code = text
-                            error = null
-                        }
+                    2 -> ScrollingStep { StepStyle(vm = vm) }
+                    3 -> ScrollingStep {
+                        StepPrompt(
+                            vm = vm,
+                            copied = copied,
+                            onCopy = {
+                                clipboard.setText(AnnotatedString(vm.prompt()))
+                                copied = true
+                            },
+                            onOpenClaude = {
+                                try {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://claude.ai"))
+                                    )
+                                } catch (t: Throwable) {
+                                    error = "No browser found to open Claude."
+                                }
+                            }
+                        )
                     }
-                )
+
+                    else -> StepCode(
+                        vm = vm,
+                        error = error,
+                        onError = { error = it },
+                        onOpenEditor = onOpenEditor,
+                        onPaste = {
+                            val text = clipboard.getText()?.text
+                            if (text.isNullOrBlank()) {
+                                error = "Nothing to paste. Copy the code from Claude first."
+                            } else {
+                                vm.code = text
+                                error = null
+                            }
+                        }
+                    )
+                }
             }
-            Spacer(Modifier.height(20.dp))
         }
 
-        // footer
-        Column {
+        Column(Modifier.fillMaxWidth()) {
             val nextEnabled = when (step) {
                 1 -> vm.canLeaveAudioStep()
                 2 -> vm.canLeaveStyleStep()
@@ -228,45 +257,51 @@ fun CreateScreen(
                 text = when (step) {
                     1 -> "Next unlocks once a voice file is added."
                     2 -> "Next unlocks once a style is picked."
-                    3 -> "Copy the prompt, paste it in Claude, then tap I have the code."
+                    3 -> "Copy the prompt, paste it in Claude, then tap Next."
                     else -> "Paste the code Claude returned."
                 },
                 color = Ink.Muted,
                 fontSize = 11.sp,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(110.dp))
+            Spacer(Modifier.height(12.dp))
         }
     }
+}
+
+/** Steps 1-3 scroll; step 4 is a fixed layout so the keyboard never shifts the page. */
+@Composable
+private fun ScrollingStep(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        content = content
+    )
 }
 
 @Composable
 private fun StepAudio(vm: CreateViewModel, pickError: String?, onPick: () -> Unit) {
     val motion = rememberMotionEnabled()
-    val float by androidx.compose.animation.core.rememberInfiniteTransition(label = "float")
-        .animateFloat(
-            initialValue = -5f,
-            targetValue = 5f,
-            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                animation = androidx.compose.animation.core.tween(2000),
-                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-            ),
-            label = "floatY"
-        )
+    val float by rememberInfiniteTransition(label = "float").animateFloat(
+        initialValue = -5f,
+        targetValue = 5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "floatY"
+    )
 
     Text("Add your voice", color = Ink.Text, fontWeight = FontWeight.Bold, fontSize = 26.sp)
     Spacer(Modifier.height(6.dp))
-    Text(
-        "Pick the MP3 voiceover you already made.",
-        color = Ink.Muted,
-        fontSize = 13.sp
-    )
+    Text("Pick the MP3 voiceover you already made.", color = Ink.Muted, fontSize = 13.sp)
     Spacer(Modifier.height(18.dp))
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(210.dp)
+            .height(200.dp)
             .clip(RoundedCornerShape(28.dp))
             .background(Ink.Card)
             .clickable { onPick() }
@@ -303,9 +338,7 @@ private fun StepAudio(vm: CreateViewModel, pickError: String?, onPick: () -> Uni
                 fontSize = 14.sp
             )
             Spacer(Modifier.height(4.dp))
-            MonoLabel(
-                if (vm.audioUri == null) "MP3 or any audio" else Fmt.duration(vm.audioDurationMs)
-            )
+            MonoLabel(if (vm.audioUri == null) "MP3 or any audio" else Fmt.duration(vm.audioDurationMs))
         }
     }
 
@@ -327,7 +360,7 @@ private fun StepAudio(vm: CreateViewModel, pickError: String?, onPick: () -> Uni
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 110.dp)
+                .heightIn(min = 100.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Ink.Raised)
                 .padding(14.dp)
@@ -341,16 +374,12 @@ private fun StepAudio(vm: CreateViewModel, pickError: String?, onPick: () -> Uni
                     vm.script = it
                     vm.saveDraft()
                 },
-                textStyle = androidx.compose.ui.text.TextStyle(
-                    color = Ink.Text,
-                    fontSize = 13.sp,
-                    fontFamily = Mono
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                visualTransformation = VisualTransformation.None
+                textStyle = TextStyle(color = Ink.Text, fontSize = 13.sp, fontFamily = Mono),
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
+    Spacer(Modifier.height(20.dp))
 }
 
 @Composable
@@ -379,6 +408,7 @@ private fun StepStyle(vm: CreateViewModel) {
         )
         Spacer(Modifier.height(12.dp))
     }
+    Spacer(Modifier.height(12.dp))
 }
 
 @Composable
@@ -425,7 +455,12 @@ private fun StyleCard(
                 Text(blurb, color = Ink.Muted, fontSize = 12.sp)
             }
             if (selected) {
-                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -440,11 +475,7 @@ private fun StepPrompt(
 ) {
     Text("Copy your prompt", color = Ink.Text, fontWeight = FontWeight.Bold, fontSize = 26.sp)
     Spacer(Modifier.height(6.dp))
-    Text(
-        "Paste this into Claude. Claude replies with one HTML code.",
-        color = Ink.Muted,
-        fontSize = 13.sp
-    )
+    Text("Paste this into Claude. Claude replies with one HTML code.", color = Ink.Muted, fontSize = 13.sp)
     Spacer(Modifier.height(16.dp))
 
     val prompt = remember(vm.audioName, vm.audioDurationMs, vm.style, vm.script) { vm.prompt() }
@@ -452,7 +483,7 @@ private fun StepPrompt(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(340.dp)
+            .height(320.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(Ink.Card)
             .padding(16.dp)
@@ -490,6 +521,7 @@ private fun StepPrompt(
         color = Ink.Muted,
         fontSize = 11.sp
     )
+    Spacer(Modifier.height(20.dp))
 }
 
 @Composable
@@ -500,82 +532,101 @@ private fun StepCode(
     onOpenEditor: () -> Unit,
     onPaste: () -> Unit
 ) {
-    Text("Have a code? Click me", color = Ink.Text, fontWeight = FontWeight.Bold, fontSize = 26.sp)
-    Spacer(Modifier.height(6.dp))
-    Text(
-        "Paste the HTML code Claude gave you. It stays on your phone.",
-        color = Ink.Muted,
-        fontSize = 13.sp
-    )
-    Spacer(Modifier.height(16.dp))
+    val valid = CodeValidator.validate(vm.code) is CodeValidator.Result.Ok
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(280.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(Ink.Card)
-            .border(1.dp, if (error != null) Ink.Danger else Ink.Divider, RoundedCornerShape(24.dp))
-            .padding(16.dp)
-    ) {
-        if (vm.code.isEmpty()) {
-            Text("Paste here", color = Ink.Muted, fontSize = 13.sp, fontFamily = Mono)
-        }
-        BasicTextField(
-            value = vm.code,
-            onValueChange = {
-                vm.code = it
-                onError(null)
-                vm.saveDraft()
-            },
-            textStyle = androidx.compose.ui.text.TextStyle(
-                color = Ink.Text,
-                fontSize = 11.sp,
-                fontFamily = Mono
-            ),
-            modifier = Modifier.fillMaxSize()
-        )
-    }
+    Column(Modifier.fillMaxSize()) {
+        Text("Have a code? Click me", color = Ink.Text, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+        Spacer(Modifier.height(6.dp))
+        Text("Paste the HTML code Claude gave you. It stays on your phone.", color = Ink.Muted, fontSize = 13.sp)
+        Spacer(Modifier.height(14.dp))
 
-    if (error != null) {
-        Spacer(Modifier.height(10.dp))
-        Text(error, color = Ink.Danger, fontSize = 12.sp)
-    }
-
-    Spacer(Modifier.height(12.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        PillButton(
-            text = "Paste",
-            filled = false,
-            icon = Icons.Rounded.ContentCopy,
-            onClick = onPaste,
-            modifier = Modifier.weight(1f)
-        )
-        PillButton(
-            text = "Edit video",
-            filled = false,
-            icon = Icons.Rounded.MusicNote,
-            onClick = {
-                val check = CodeValidator.validate(vm.code)
-                if (check is CodeValidator.Result.Ok) {
-                    vm.code = CodeValidator.normalize(vm.code)
-                    vm.saveDraft()
-                    onOpenEditor()
-                } else if (check is CodeValidator.Result.Bad) {
-                    onError(check.message)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Ink.Card)
+                .border(1.dp, if (error != null) Ink.Danger else Ink.Divider, RoundedCornerShape(24.dp))
+        ) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (vm.code.isEmpty()) {
+                        Text("Paste here", color = Ink.Muted, fontSize = 13.sp, fontFamily = Mono)
+                    }
+                    BasicTextField(
+                        value = vm.code,
+                        onValueChange = {
+                            vm.code = it
+                            onError(null)
+                            vm.saveDraft()
+                        },
+                        textStyle = TextStyle(color = Ink.Text, fontSize = 11.sp, fontFamily = Mono),
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                    )
                 }
-            },
-            enabled = CodeValidator.validate(vm.code) is CodeValidator.Result.Ok,
-            modifier = Modifier.weight(1f)
-        )
-    }
+            }
+        }
 
-    Spacer(Modifier.height(16.dp))
-    RawCard(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = when {
+                error != null -> error
+                vm.code.isEmpty() -> "Needs window.RAW, seek(t) and a layers list."
+                valid -> "Looks good."
+                else -> "Missing something. Check for window.RAW, seek(t) and layers."
+            },
+            color = when {
+                error != null -> Ink.Danger
+                valid && vm.code.isNotEmpty() -> Ink.Muted
+                else -> Ink.Muted
+            },
+            fontSize = 11.sp
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton(
+                text = "Paste",
+                filled = false,
+                icon = Icons.Rounded.ContentCopy,
+                onClick = onPaste,
+                modifier = Modifier.weight(1f)
+            )
+            PillButton(
+                text = "Edit video",
+                filled = false,
+                icon = Icons.Rounded.MusicNote,
+                onClick = {
+                    val check = CodeValidator.validate(vm.code)
+                    if (check is CodeValidator.Result.Ok) {
+                        vm.code = CodeValidator.normalize(vm.code)
+                        vm.saveDraft()
+                        onOpenEditor()
+                    } else if (check is CodeValidator.Result.Bad) {
+                        onError(check.message)
+                    }
+                },
+                enabled = valid,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Ink.Card)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(Modifier.weight(1f)) {
-                Text("Fast mode", color = Ink.Text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text("Renders at 720p. About twice as quick.", color = Ink.Muted, fontSize = 11.sp)
+                Text("Fast mode (720p)", color = Ink.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Text(
+                    if (vm.lowEndDevice) "Recommended on this phone." else "About twice as quick.",
+                    color = Ink.Muted,
+                    fontSize = 11.sp
+                )
             }
             Box(
                 modifier = Modifier
@@ -585,7 +636,8 @@ private fun StepCode(
                     .clickable {
                         vm.fastMode = !vm.fastMode
                         vm.saveDraft()
-                    },
+                    }
+                    .animateContentSize(),
                 contentAlignment = if (vm.fastMode) Alignment.CenterEnd else Alignment.CenterStart
             ) {
                 Box(
@@ -597,11 +649,6 @@ private fun StepCode(
                 )
             }
         }
+        Spacer(Modifier.height(10.dp))
     }
-    Spacer(Modifier.height(8.dp))
-    Text(
-        "Rendering happens on this phone. Keep the app open until it finishes.",
-        color = Ink.Muted,
-        fontSize = 11.sp
-    )
 }

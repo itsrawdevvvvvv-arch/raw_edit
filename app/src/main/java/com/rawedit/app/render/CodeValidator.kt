@@ -18,18 +18,22 @@ object CodeValidator {
         if (trimmed.toByteArray().size > MAX_BYTES) {
             return Result.Bad("That code is too large. Ask Claude for a smaller single file.")
         }
-        if (trimmed.startsWith("{") && trimmed.endsWith("}") && !trimmed.contains("<")) {
-            return Result.Bad("That looks like JSON, not the HTML file. Paste the whole HTML code.")
+        if (!trimmed.contains("<")) {
+            return Result.Bad("That isn't an HTML file. Ask Claude to try again.")
         }
-        val hasRaw = trimmed.contains("window.RAW") || trimmed.contains("RAW =") || trimmed.contains("RAW=")
+        if (!trimmed.contains("<!doctype", ignoreCase = true) && !trimmed.contains("<html", ignoreCase = true)) {
+            return Result.Bad("That is not a full HTML file. Paste everything Claude returned.")
+        }
+        val hasRaw = trimmed.contains("window.RAW") || trimmed.contains("RAW =") ||
+            trimmed.contains("RAW=") || trimmed.contains("RAW =")
         if (!hasRaw) {
-            return Result.Bad("That code doesn't look right. Ask Claude to try again with window.RAW.")
+            return Result.Bad("That code doesn't look right: no window.RAW found. Ask Claude to try again.")
         }
         if (!trimmed.contains("seek")) {
             return Result.Bad("The code has no seek(t) function. Ask Claude to add it.")
         }
-        if (!trimmed.contains("<")) {
-            return Result.Bad("That isn't an HTML file. Ask Claude to try again.")
+        if (!trimmed.contains("layers")) {
+            return Result.Bad("The code has no window.RAW.layers list. Ask Claude to add it.")
         }
         return Result.Ok
     }

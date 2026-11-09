@@ -28,18 +28,36 @@ class VideoEncoder(
 
     fun start() {
         colorFormat = pickColorFormat()
-        val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
-            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        // Try the default profile first, then baseline, which every Android 9 encoder supports.
+        val profiles = intArrayOf(-1, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+        var lastError: Throwable? = null
+        for (profile in profiles) {
+            val c = try {
+                val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
+                    setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+                    setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    if (profile > 0) setInteger(MediaFormat.KEY_PROFILE, profile)
+                }
+                val codecInstance = MediaCodec.createEncoderByType(MIME)
+                codecInstance.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                codecInstance.start()
+                codecInstance
+            } catch (t: Throwable) {
+                lastError = t
+                null
+            }
+            if (c != null) {
+                codec = c
+                muxer = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                return
+            }
         }
-        val c = MediaCodec.createEncoderByType(MIME)
-        c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        c.start()
-        codec = c
-        val m = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        muxer = m
+        throw IllegalStateException(
+            "Encoder rejected " + width + "x" + height + ": " + (lastError?.message ?: "unknown"),
+            lastError
+        )
     }
 
     fun encode(bitmap: Bitmap, ptsUs: Long) {

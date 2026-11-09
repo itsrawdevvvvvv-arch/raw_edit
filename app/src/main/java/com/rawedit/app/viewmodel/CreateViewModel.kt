@@ -1,6 +1,8 @@
 package com.rawedit.app.viewmodel
 
+import android.app.ActivityManager
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +20,18 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = Prefs.get(app)
 
+    /** True on a 2-3 GB phone: default to 720p at 24 fps and lighten the UI. */
+    val lowEndDevice: Boolean by lazy {
+        try {
+            val am = app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(info)
+            am.isLowRamDevice || info.totalMem < 3L * 1024L * 1024L * 1024L
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
     var audioUri: Uri? by mutableStateOf(null)
         private set
     var audioName: String by mutableStateOf("")
@@ -27,7 +41,7 @@ class CreateViewModel(app: Application) : AndroidViewModel(app) {
     var script: String by mutableStateOf("")
     var style: Style? by mutableStateOf(null)
     var code: String by mutableStateOf("")
-    var fastMode: Boolean by mutableStateOf(false)
+    var fastMode: Boolean by mutableStateOf(true)
     var layers: List<Layer> by mutableStateOf(emptyList())
     var layersJson: String? by mutableStateOf(null)
     var lastVideoPath: String? by mutableStateOf(null)

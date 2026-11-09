@@ -1,7 +1,6 @@
 package com.rawedit.app.ui.screens
 
 import android.graphics.Bitmap
-import android.view.View
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -29,6 +28,7 @@ import com.rawedit.app.data.VideoStore
 import com.rawedit.app.render.RenderEngine
 import com.rawedit.app.render.StageHost
 import com.rawedit.app.render.WebStage
+import com.rawedit.app.service.RenderService
 import com.rawedit.app.ui.components.MonoLabel
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.components.ShimmerBar
@@ -42,56 +42,86 @@ import kotlinx.coroutines.Job
 fun RenderScreen(
     vm: CreateViewModel,
     onFinished: () -> Unit,
-    onFailed: (String) -> Unit,
+    onExitToCode: () -> Unit,
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
     val view = LocalView.current
+
     var host by remember { mutableStateOf<StageHost?>(null) }
     var stage by remember { mutableStateOf<WebStage?>(null) }
     var progress by remember { mutableFloatStateOf(0.02f) }
-    var status by remember { mutableStateOf("Reading code") }
+    var stageText by remember { mutableStateOf("Reading code") }
     var preview by remember { mutableStateOf<Bitmap?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) }
     var job by remember { mutableStateOf<Job?>(null) }
+    var startedAt by remember { mutableLongStateOf(0L) }
+    var userCancelled by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         onDispose {
             view.keepScreenOn = false
             job?.cancel()
+            RenderService.stop(context)
         }
     }
 
-    LaunchedEffect(host) {
-        val h = host ?: return@LaunchedEffect
+    LaunchedEffect(attempt, host) {
         val s = stage ?: return@LaunchedEffect
-        job = coroutineContext[Job]
+        if (host == null) return@LaunchedEffect
         val uri = vm.audioUri
         if (uri == null) {
-            error = "No voice file. Go back and add one."
+            errorMessage = "No voice file. Go back and add one."
             return@LaunchedEffect
         }
-        val outW = if (vm.fastMode) 1280 else 1920
-        val outH = if (vm.fastMode) 720 else 1080
+
+        job = coroutineContext[Job]
+        errorMessage = null
+        progress = 0.02f
+        stageText = "Reading code"
+        preview = null
+        startedAt = System.currentTimeMillis()
+        userCancelled = false
+        RenderService.start(context)
+
+        val lowEnd = vm.lowEndDevice
+        val width = when {
+            vm.fastMode -> 1280
+            lowEnd -> 1280
+            else -> 1920
+        }
+        val height = if (width == 1920) 1080 else 720
+        val fps = if (lowEnd) 24 else 30
+
         val engine = RenderEngine(
             context = context,
             stage = s,
             audioUri = uri,
             durationMs = vm.audioDurationMs,
-            outWidth = outW,
-            outHeight = outH
+            preferredWidth = width,
+            preferredHeight = height,
+            fps = fps
         )
+
+        var lastNotifAt = 0L
         try {
             val result = engine.render(
                 code = vm.code,
                 layersJson = vm.layersJson,
-                onProgress = { p, text ->
+                onStage = { stageText = it },
+                onProgress = { p ->
                     progress = p
-                    status = text
+                    val now = System.currentTimeMillis()
+                    if (now - lastNotifAt > 1000) {
+                        lastNotifAt = now
+                        RenderService.update(context, (p * 100).toInt(), stageText)
+                    }
                 },
                 onPreview = { bmp -> preview = bmp }
             )
+            RenderService.stop(context)
             vm.lastVideoPath = result.video.absolutePath
             vm.lastThumbPath = result.thumb.absolutePath
             vm.lastDurationMs = vm.audioDurationMs
@@ -106,108 +136,148 @@ fun RenderScreen(
                 )
             )
             progress = 1f
-            status = "Done"
+            stageText = "Done"
             onFinished()
         } catch (c: CancellationException) {
-            onCancel()
+            RenderService.stop(context)
+            // Only leave the screen when the user actually asked to cancel.
+            if (userCancelled) onCancel()
         } catch (t: Throwable) {
-            error = t.message ?: "Something went wrong while rendering."
+            RenderService.stop(context)
+            errorMessage = t.message ?: "Something went wrong while rendering."
         }
     }
 
-    Column(
+    // Opaque, full screen: nothing underneath can show through.
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(Ink.Background)
     ) {
-        Spacer(Modifier.height(30.dp))
-        MonoLabel("RENDERING ON THIS PHONE")
-        Spacer(Modifier.height(18.dp))
-
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.Black)
+                .fillMaxSize()
+                .padding(horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // The WebView stays visible and laid out at full stage size; it is the live preview.
-            AndroidView(
-                factory = { ctx ->
-                    StageHost(ctx).also { h ->
-                        val ws = WebStage(ctx, h.web)
-                        ws.prepare()
-                        h.lockInput()
-                        host = h
-                        stage = ws
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-            val p = preview
-            if (p != null) {
-                Image(
-                    bitmap = p.asImageBitmap(),
-                    contentDescription = "Preview",
-                    contentScale = ContentScale.Fit,
+            Spacer(Modifier.height(24.dp))
+            MonoLabel(if (errorMessage == null) "RENDERING ON THIS PHONE" else "RENDER STOPPED")
+            Spacer(Modifier.height(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black)
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        StageHost(ctx).also { h ->
+                            val ws = WebStage(ctx, h.web)
+                            ws.prepare()
+                            h.lockInput()
+                            host = h
+                            stage = ws
+                        }
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
+                val p = preview
+                if (p != null) {
+                    Image(
+                        bitmap = p.asImageBitmap(),
+                        contentDescription = "Live preview",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
+
+            Spacer(Modifier.height(22.dp))
+
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage!!,
+                    color = Ink.Danger,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Nothing was saved. You can fix the code and try again.",
+                    color = Ink.Muted,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(22.dp))
+                PillButton(
+                    text = "Retry",
+                    onClick = { attempt += 1 },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                PillButton(
+                    text = "Back to code",
+                    filled = false,
+                    onClick = {
+                        RenderService.stop(context)
+                        onExitToCode()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Text(
+                    text = stageText,
+                    color = Ink.Text,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 19.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = (progress * 100).toInt().toString() + "%" + estimateText(progress, startedAt),
+                    color = Ink.Muted,
+                    fontFamily = Mono,
+                    fontSize = 12.sp
+                )
+                Spacer(Modifier.height(14.dp))
+                ShimmerBar(progress = progress, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Keep the app open. Progress also shows in the notification.",
+                    color = Ink.Muted,
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                PillButton(
+                    text = "Cancel",
+                    filled = false,
+                    icon = Icons.Rounded.Close,
+                    onClick = {
+                        userCancelled = true
+                        RenderService.stop(context)
+                        job?.cancel()
+                        onCancel()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.height(26.dp))
         }
-
-        Spacer(Modifier.height(26.dp))
-        Text(
-            text = status,
-            color = Ink.Text,
-            fontWeight = FontWeight.Bold,
-            fontSize = 20.sp,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = (progress * 100).toInt().toString() + "%",
-            color = Ink.Muted,
-            fontFamily = Mono,
-            fontSize = 13.sp
-        )
-        Spacer(Modifier.height(16.dp))
-        ShimmerBar(progress = progress, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(14.dp))
-        Text(
-            text = "Keep the app open. A 1 minute video usually takes a few minutes on a phone.",
-            color = Ink.Muted,
-            fontSize = 11.sp,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.weight(1f))
-
-        if (error != null) {
-            Text(
-                text = error!!,
-                color = Ink.Danger,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(14.dp))
-            PillButton(
-                text = "Go back",
-                onClick = { onFailed(error!!) },
-                modifier = Modifier.fillMaxWidth()
-            )
-        } else {
-            PillButton(
-                text = "Cancel",
-                filled = false,
-                icon = Icons.Rounded.Close,
-                onClick = {
-                    job?.cancel()
-                    onCancel()
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        Spacer(Modifier.height(30.dp))
     }
+}
+
+private fun estimateText(progress: Float, startedAt: Long): String {
+    if (startedAt <= 0L || progress <= 0.03f || progress >= 1f) return ""
+    val elapsed = System.currentTimeMillis() - startedAt
+    val total = elapsed / progress
+    val left = ((total - elapsed) / 1000L).coerceAtLeast(0L)
+    if (left < 5) return ""
+    val mins = left / 60
+    val secs = left % 60
+    return "  -  about " + (if (mins > 0) mins.toString() + "m " else "") + secs + "s left"
 }

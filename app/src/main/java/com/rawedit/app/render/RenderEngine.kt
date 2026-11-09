@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
+import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -14,30 +15,43 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
-import kotlin.math.min
+
+/** A render failure that carries a message we can safely show to the user. */
+class RenderException(message: String) : Exception(message)
 
 /**
  * Runs the whole render on the phone: drives the WebView frame by frame,
  * encodes H.264, encodes the voiceover to AAC and muxes both into one MP4.
+ *
+ * Every stage reports real progress, and a failed stage never disappears silently.
  */
 class RenderEngine(
     private val context: Context,
     private val stage: WebStage,
     private val audioUri: Uri,
     private val durationMs: Long,
-    private val outWidth: Int,
-    private val outHeight: Int,
-    private val fps: Int = 30
+    private val preferredWidth: Int,
+    private val preferredHeight: Int,
+    private val fps: Int
 ) {
 
-    data class Result(val video: File, val thumb: File)
+    data class Result(
+        val video: File,
+        val thumb: File,
+        val width: Int,
+        val height: Int,
+        val frames: Int,
+        val elapsedMs: Long
+    )
 
     suspend fun render(
         code: String,
         layersJson: String?,
-        onProgress: (Float, String) -> Unit,
+        onStage: (String) -> Unit,
+        onProgress: (Float) -> Unit,
         onPreview: (Bitmap) -> Unit
     ): Result = withContext(Dispatchers.Main) {
+        val startedAt = SystemClock.uptimeMillis()
         val workDir = File(context.filesDir, "renders/tmp").apply { mkdirs() }
         val stamp = System.currentTimeMillis()
         val tempAudio = File(workDir, "audio_$stamp.mp4")
@@ -47,47 +61,136 @@ class RenderEngine(
 
         var encoder: VideoEncoder? = null
         try {
-            onProgress(0.01f, "Reading code")
+            // ---- stage 1: read the code ----
+            onStage("Reading code")
+            onProgress(0.02f)
             if (!stage.load(code)) {
-                throw IllegalStateException("The code didn't start. Ask Claude to try again.")
+                val probe = stage.probe()
+                throw RenderException(
+                    when {
+                        !probe.hasRaw -> "Couldn't read the code: window.RAW was not found."
+                        !probe.hasSeek -> "Couldn't read the code: seek(t) is missing."
+                        else -> "The code loaded but never became ready. Ask Claude to try again."
+                    }
+                )
             }
-            if (!layersJson.isNullOrBlank()) {
-                stage.writeLayers(layersJson)
-            }
+            if (!layersJson.isNullOrBlank()) stage.writeLayers(layersJson)
             checkActive()
+            onProgress(0.05f)
 
-            onProgress(0.05f, "Adding voice")
+            // ---- stage 2: voice ----
+            onStage("Preparing voice")
             val audioOk = withContext(Dispatchers.IO) {
                 AudioTranscoder(context).transcode(audioUri, tempAudio)
             }
             if (!audioOk) {
-                throw IllegalStateException("The voice file could not be read. Try another MP3.")
+                throw RenderException("Couldn't read the voice file. Try another MP3 or WAV.")
             }
             checkActive()
+            onProgress(0.09f)
 
-            val capture = Bitmap.createBitmap(StageHost.STAGE_W, StageHost.STAGE_H, Bitmap.Config.ARGB_8888)
-            val scaled = if (outWidth == StageHost.STAGE_W && outHeight == StageHost.STAGE_H) {
-                null
-            } else {
-                Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
+            // ---- stage 3: frames, with a resolution fallback ----
+            val attempts = buildList {
+                add(preferredWidth to preferredHeight)
+                if (preferredWidth > 1280) add(1280 to 720)
+                add(854 to 480)
+            }.distinct()
+
+            var lastError: Throwable? = null
+            for ((requestedW, requestedH) in attempts) {
+                val w = requestedW - (requestedW % 2)
+                val h = requestedH - (requestedH % 2)
+                try {
+                    onStage(if (w == requestedW) "Preparing frames" else "Retrying at ${h}p")
+                    val (frames, fpsUsed) = encodeFrames(w, h, tempVideo, onStage, onProgress, onPreview)
+                    encoder = null
+                    checkActive()
+
+                    // ---- stage 4: poster frame ----
+                    onStage("Saving poster")
+                    onProgress(0.94f)
+                    writeThumb(thumbFile)
+
+                    // ---- stage 5: mux ----
+                    onStage("Muxing audio")
+                    onProgress(0.96f)
+                    val combined = withContext(Dispatchers.IO) {
+                        Mp4Combine.combine(tempVideo, tempAudio, outFile)
+                    }
+                    if (!combined || !outFile.exists() || outFile.length() < 1024) {
+                        throw RenderException("The video could not be finished. Try a shorter voiceover.")
+                    }
+                    onStage("Done")
+                    onProgress(1f)
+                    return@withContext Result(
+                        video = outFile,
+                        thumb = thumbFile,
+                        width = w,
+                        height = h,
+                        frames = frames,
+                        elapsedMs = SystemClock.uptimeMillis() - startedAt
+                    )
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (oom: OutOfMemoryError) {
+                    lastError = oom
+                    encoder?.release()
+                    encoder = null
+                } catch (t: Throwable) {
+                    lastError = t
+                    encoder?.release()
+                    encoder = null
+                }
             }
-            val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-            val dst = Rect(0, 0, outWidth, outHeight)
+            throw RenderException(
+                "This phone's encoder couldn't make the video. " +
+                    (lastError?.message ?: "Try Fast mode.")
+            )
+        } catch (c: CancellationException) {
+            encoder?.release()
+            outFile.delete()
+            throw c
+        } catch (t: Throwable) {
+            encoder?.release()
+            outFile.delete()
+            throw t
+        } finally {
+            tempAudio.delete()
+            tempVideo.delete()
+        }
+    }
 
-            val seconds = durationMs / 1000.0
-            val totalFrames = max(1, (seconds * fps).toInt())
+    private suspend fun encodeFrames(
+        width: Int,
+        height: Int,
+        tempVideo: File,
+        onStage: (String) -> Unit,
+        onProgress: (Float) -> Unit,
+        onPreview: (Bitmap) -> Unit
+    ): Pair<Int, Int> {
+        val seconds = durationMs / 1000.0
+        val totalFrames = max(1, (seconds * fps).toInt())
 
-            val ve = VideoEncoder(outWidth, outHeight, fps, bitrateFor(), tempVideo)
-            encoder = ve
-            ve.start()
+        val capture = Bitmap.createBitmap(StageHost.STAGE_W, StageHost.STAGE_H, Bitmap.Config.ARGB_8888)
+        val scaled = if (width == StageHost.STAGE_W && height == StageHost.STAGE_H) {
+            null
+        } else {
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        }
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val dst = Rect(0, 0, width, height)
 
-            val previewStep = max(1, totalFrames / 24)
+        val ve = VideoEncoder(width, height, fps, bitrateFor(width), tempVideo)
+        ve.start()
+        try {
+            val previewStep = max(1, totalFrames / 20)
+            var lastProgressAt = 0L
             var lastPreviewAt = 0L
+            var lastFrameAt = SystemClock.uptimeMillis()
 
             for (i in 0 until totalFrames) {
                 checkActive()
-                val t = i.toDouble() / fps
-                stage.seek(t)
+                stage.seek(i.toDouble() / fps)
                 stage.drawTo(capture)
 
                 val frame = if (scaled == null) {
@@ -98,86 +201,52 @@ class RenderEngine(
                 }
                 ve.encode(frame, (i * 1_000_000L) / fps)
 
-                if (i % previewStep == 0) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastPreviewAt > 260) {
-                        lastPreviewAt = now
-                        onPreview(Bitmap.createScaledBitmap(frame, 384, 216, true))
-                    }
+                val now = SystemClock.uptimeMillis()
+                if (i % previewStep == 0 && now - lastPreviewAt > 400) {
+                    lastPreviewAt = now
+                    onPreview(Bitmap.createScaledBitmap(frame, 384, 216, true))
                 }
-
-                if (i % 5 == 0) {
-                    val p = 0.10f + 0.82f * (i.toFloat() / totalFrames)
-                    onProgress(p, frameStatus(i, totalFrames))
+                // at most 4 UI updates a second, so the main thread stays light
+                if (now - lastProgressAt > 250) {
+                    lastProgressAt = now
+                    val ratio = i.toFloat() / totalFrames
+                    onStage("Rendering frame " + (i + 1) + " of " + totalFrames)
+                    onProgress(0.10f + 0.82f * ratio)
                 }
+                lastFrameAt = now
             }
-
+            onStage("Encoding")
             ve.finish()
-            encoder = null
+            return totalFrames to fps
+        } finally {
+            ve.release()
             capture.recycle()
             scaled?.recycle()
+        }
+    }
 
-            checkActive()
-            onProgress(0.94f, "Adding voice")
-
-            // grab a poster frame
-            try {
-                stage.seek(min(1.0, seconds / 2.0))
-                val poster = Bitmap.createBitmap(StageHost.STAGE_W, StageHost.STAGE_H, Bitmap.Config.ARGB_8888)
-                stage.drawTo(poster)
-                val small = Bitmap.createScaledBitmap(poster, 640, 360, true)
-                FileOutputStream(thumbFile).use { out ->
-                    small.compress(Bitmap.CompressFormat.PNG, 92, out)
-                }
-                small.recycle()
-                poster.recycle()
-            } catch (t: Throwable) {
-                // a missing thumbnail is not fatal
+    private suspend fun writeThumb(thumbFile: File) {
+        try {
+            val seconds = durationMs / 1000.0
+            stage.seek(minOf(1.0, seconds / 2.0))
+            val poster = Bitmap.createBitmap(StageHost.STAGE_W, StageHost.STAGE_H, Bitmap.Config.ARGB_8888)
+            stage.drawTo(poster)
+            val small = Bitmap.createScaledBitmap(poster, 640, 360, true)
+            FileOutputStream(thumbFile).use { out ->
+                small.compress(Bitmap.CompressFormat.PNG, 90, out)
             }
-
-            onProgress(0.96f, "Finishing video")
-            val combined = withContext(Dispatchers.IO) {
-                Mp4Combine.combine(tempVideo, tempAudio, outFile)
-            }
-            if (!combined || !outFile.exists() || outFile.length() < 1024) {
-                throw IllegalStateException("The video could not be finished. Try a shorter voiceover.")
-            }
-
-            onProgress(1f, "Done")
-            Result(outFile, thumbFile)
-        } catch (c: CancellationException) {
-            try {
-                encoder?.release()
-            } catch (t: Throwable) {
-                // ignore
-            }
-            outFile.delete()
-            throw c
+            small.recycle()
+            poster.recycle()
         } catch (t: Throwable) {
-            try {
-                encoder?.release()
-            } catch (x: Throwable) {
-                // ignore
-            }
-            outFile.delete()
-            throw t
-        } finally {
-            tempAudio.delete()
-            tempVideo.delete()
+            // a missing poster is not fatal
         }
     }
 
-    private fun frameStatus(i: Int, total: Int): String {
-        val pct = (i * 100) / total
-        return when {
-            pct < 15 -> "Reading code"
-            pct < 55 -> "Drawing frames"
-            pct < 90 -> "Drawing frames"
-            else -> "Adding voice"
-        }
+    private fun bitrateFor(width: Int): Int = when {
+        width >= 1920 -> 3_200_000
+        width >= 1280 -> 1_900_000
+        else -> 1_100_000
     }
-
-    private fun bitrateFor(): Int = if (outWidth >= 1920) 3_200_000 else 1_600_000
 
     private suspend fun checkActive() {
         if (!currentCoroutineContext().isActive) throw CancellationException("cancelled")

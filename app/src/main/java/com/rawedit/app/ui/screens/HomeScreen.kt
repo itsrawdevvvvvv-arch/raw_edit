@@ -23,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -34,6 +33,7 @@ import coil.compose.AsyncImage
 import com.rawedit.app.BuildConfig
 import com.rawedit.app.ui.components.DotGrid
 import com.rawedit.app.ui.components.LogoMark
+import com.rawedit.app.ui.components.NavBottomSpacer
 import com.rawedit.app.ui.components.MonoLabel
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.components.RawCard
@@ -52,18 +52,6 @@ fun HomeScreen(
     onAbout: () -> Unit,
     onProfile: () -> Unit
 ) {
-    val motion = rememberMotionEnabled()
-    val transition = rememberInfiniteTransition(label = "hero")
-    val sway by transition.animateFloat(
-        initialValue = -2.6f,
-        targetValue = 2.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3400),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "sway"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -106,7 +94,6 @@ fun HomeScreen(
                 // Studio card
                 Row(
                     modifier = Modifier
-                        .rotate(if (motion) sway else 0f)
                         .clip(RoundedCornerShape(22.dp))
                         .background(Ink.Raised)
                         .padding(14.dp),
@@ -267,7 +254,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(120.dp))
+        NavBottomSpacer()
     }
 }
 
