@@ -80,17 +80,11 @@ class RenderEngine(
             // Warm the page up. The first seek builds the DOM, so it can take a few
             // tries; a slow first call is not a broken page. The frame loop and the
             // blank-frame watchdog decide whether the page really works.
-            var warmed = false
-            for (tryIndex in 0 until 4) {
-                if (stage.seek(0.0)) {
-                    warmed = true
-                    break
-                }
-                onStage("Warming up")
-            }
-            if (!warmed) {
-                // One more chance with a longer timeout before giving up.
-                warmed = stage.seek(0.0)
+            // Warm the page up: the first seek builds the DOM. Never block here - a
+            // slow warm-up is not a broken page, and the frame loop is the real test.
+            onStage("Warming up")
+            for (tryIndex in 0 until 3) {
+                if (stage.seek(0.0)) break
             }
             checkActive()
             onProgress(0.05f)

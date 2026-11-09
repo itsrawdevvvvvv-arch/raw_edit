@@ -30,6 +30,10 @@ class WebStage(private val context: Context, private val web: WebView) {
 
     private var pageReady = false
 
+    /** Last raw reply from the JS bridge, used to explain a failure. */
+    var lastDiagnostic: String = ""
+        private set
+
     data class Probe(
         val hasRaw: Boolean = false,
         val hasSeek: Boolean = false,
@@ -130,10 +134,14 @@ class WebStage(private val context: Context, private val web: WebView) {
 
     suspend fun seek(t: Double): Boolean = withContext(Dispatchers.Main) {
         if (!pageReady) return@withContext false
-        val ok = evalJs("(function(){try{window.RAW.seek($t);return '1';}catch(e){return '0';}})()", 8000)
+        val ok = evalJs(
+            "(function(){try{window.RAW.seek($t);return '1';}catch(e){return '0:'+e.message;}})()",
+            8000
+        )
+        lastDiagnostic = ok ?: "no reply from the page (timeout)"
         web.invalidate()
         awaitFrame()
-        ok != null && ok.contains("1")
+        ok != null && ok.trim().trim('"').startsWith("1")
     }
 
     suspend fun readLayers(): String = withContext(Dispatchers.Main) {
