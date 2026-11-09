@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -51,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -63,11 +65,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rawedit.app.data.Style
 import com.rawedit.app.render.CodeValidator
 import com.rawedit.app.ui.components.MonoLabel
+import com.rawedit.app.ui.components.NavPillClearance
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.components.RawCard
 import com.rawedit.app.ui.components.StepProgress
@@ -129,9 +135,11 @@ fun CreateScreen(
         if (step > 1) step -= 1 else onBack()
     }
 
+    val topInset = rememberTopInset()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = topInset)
             .imePadding()
             .padding(horizontal = 18.dp)
     ) {
@@ -169,11 +177,9 @@ fun CreateScreen(
                         animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
                     ) { if (forward) shift else -shift } +
                         fadeIn(tween(MotionSpec.SCREEN, easing = MotionSpec.Enter))
-                    val exit = slideOutHorizontally(
-                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Exit)
-                    ) { if (forward) -shift else shift } +
-                        fadeOut(tween(MotionSpec.SMALL, easing = MotionSpec.Exit))
-                    enter togetherWith exit
+                    // The outgoing step is removed at once. Cross-fading two full steps
+                    // drew both on top of each other, which is what the recording shows.
+                    enter togetherWith ExitTransition.None
                 },
                 label = "step"
             ) { current ->
@@ -267,7 +273,7 @@ fun CreateScreen(
                 fontSize = 11.sp,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(12.dp))
+            NavPillClearance(extra = 2.dp)
         }
     }
 }
@@ -331,14 +337,18 @@ private fun StepAudio(vm: CreateViewModel, pickError: String?, onPick: () -> Uni
                 tint = Ink.Text,
                 modifier = Modifier
                     .size(38.dp)
-                    .offset(y = if (motion) float.dp else 0.dp)
+                    .graphicsLayer { translationY = if (motion) float * density else 0f }
             )
             Spacer(Modifier.height(14.dp))
             Text(
                 text = if (vm.audioUri == null) "Tap to choose your MP3" else vm.audioName,
                 color = Ink.Text,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp
+                fontSize = 14.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 18.dp)
             )
             Spacer(Modifier.height(4.dp))
             MonoLabel(if (vm.audioUri == null) "MP3 or any audio" else Fmt.duration(vm.audioDurationMs))
@@ -499,6 +509,7 @@ private fun StepPrompt(
                 fontSize = 11.sp,
                 lineHeight = 17.sp
             )
+            Spacer(Modifier.height(14.dp))
         }
     }
 

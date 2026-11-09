@@ -12,20 +12,34 @@ android {
         applicationId = "com.rawedit.app"
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    // One committed keystore signs every build, so installing an update over an
+    // older install never fails with a signature mismatch.
+    signingConfigs {
+        create("stable") {
+            storeFile = rootProject.file("keystore/raw_edit.jks")
+            storePassword = "rawedit2026"
+            keyAlias = "raw_edit"
+            keyPassword = "rawedit2026"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("stable")
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("stable")
         }
     }
 

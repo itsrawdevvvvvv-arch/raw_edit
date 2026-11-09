@@ -34,6 +34,7 @@ import com.rawedit.app.BuildConfig
 import com.rawedit.app.ui.components.DotGrid
 import com.rawedit.app.ui.components.LogoMark
 import com.rawedit.app.ui.components.NavBottomSpacer
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.components.MonoLabel
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.components.RawCard
@@ -52,9 +53,11 @@ fun HomeScreen(
     onAbout: () -> Unit,
     onProfile: () -> Unit
 ) {
+    val topInset = rememberTopInset()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = topInset)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 18.dp)
     ) {

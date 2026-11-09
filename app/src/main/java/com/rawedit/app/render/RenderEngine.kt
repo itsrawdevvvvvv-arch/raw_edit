@@ -32,7 +32,9 @@ class RenderEngine(
     private val durationMs: Long,
     private val preferredWidth: Int,
     private val preferredHeight: Int,
-    private val fps: Int
+    private val fps: Int,
+    private val stageWidth: Int = StageHost.STAGE_W,
+    private val stageHeight: Int = StageHost.STAGE_H
 ) {
 
     data class Result(
@@ -75,6 +77,11 @@ class RenderEngine(
                 )
             }
             if (!layersJson.isNullOrBlank()) stage.writeLayers(layersJson)
+            if (!stage.seek(0.0)) {
+                throw RenderException(
+                    "The code loaded but seek(0) failed. Ask Claude to fix the seek(t) function."
+                )
+            }
             checkActive()
             onProgress(0.05f)
 
@@ -171,8 +178,8 @@ class RenderEngine(
         val seconds = durationMs / 1000.0
         val totalFrames = max(1, (seconds * fps).toInt())
 
-        val capture = Bitmap.createBitmap(StageHost.STAGE_W, StageHost.STAGE_H, Bitmap.Config.ARGB_8888)
-        val scaled = if (width == StageHost.STAGE_W && height == StageHost.STAGE_H) {
+        val capture = Bitmap.createBitmap(stageWidth, stageHeight, Bitmap.Config.ARGB_8888)
+        val scaled = if (width == stageWidth && height == stageHeight) {
             null
         } else {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -184,6 +191,8 @@ class RenderEngine(
         ve.start()
         try {
             val previewStep = max(1, totalFrames / 20)
+            var sampled = 0
+            var blank = 0
             var lastProgressAt = 0L
             var lastPreviewAt = 0L
             var lastFrameAt = SystemClock.uptimeMillis()
@@ -198,6 +207,10 @@ class RenderEngine(
                 } else {
                     Canvas(scaled).drawBitmap(capture, null, dst, paint)
                     scaled
+                }
+                if (i % 15 == 0) {
+                    sampled++
+                    if (isBlank(capture)) blank++
                 }
                 ve.encode(frame, (i * 1_000_000L) / fps)
 
@@ -217,6 +230,12 @@ class RenderEngine(
             }
             onStage("Encoding")
             ve.finish()
+            if (sampled > 4 && blank * 100 / sampled > 90) {
+                throw RenderException(
+                    "Every frame came out black. This phone's WebView couldn't draw the code. " +
+                        "Try a smaller Fast mode or a different code."
+                )
+            }
             return totalFrames to fps
         } finally {
             ve.release()
@@ -239,6 +258,28 @@ class RenderEngine(
             poster.recycle()
         } catch (t: Throwable) {
             // a missing poster is not fatal
+        }
+    }
+
+    private fun isBlank(bitmap: Bitmap): Boolean {
+        return try {
+            val w = bitmap.width
+            val h = bitmap.height
+            var dark = 0
+            var total = 0
+            var y = 0
+            while (y < h) {
+                var x = 0
+                while (x < w) {
+                    total++
+                    if ((bitmap.getPixel(x, y) and 0x00FFFFFF) == 0) dark++
+                    x += 32
+                }
+                y += 32
+            }
+            total > 0 && dark == total
+        } catch (t: Throwable) {
+            false
         }
     }
 

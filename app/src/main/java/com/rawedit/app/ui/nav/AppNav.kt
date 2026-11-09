@@ -6,13 +6,11 @@ import androidx.compose.animation.core.tween
 import com.rawedit.app.ui.theme.MotionSpec
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -84,26 +82,12 @@ fun AppNav() {
         NavHost(
             navController = nav,
             startDestination = ROUTE_HOME,
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
-            // Tab switch is a fade-through: old fades out fast, new fades in with a
-            // small scale. Only opacity and transform are animated.
-            enterTransition = {
-                fadeIn(tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)) +
-                    scaleIn(
-                        initialScale = 0.98f,
-                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
-                    )
-            },
+            modifier = Modifier.fillMaxSize(),
+            // Fade only. Scaling a full screen forces an offscreen render of the whole
+            // hierarchy every frame, which is what made tab switches feel heavy.
+            enterTransition = { fadeIn(tween(MotionSpec.SMALL, easing = MotionSpec.Enter)) },
             exitTransition = { fadeOut(tween(90, easing = MotionSpec.Exit)) },
-            popEnterTransition = {
-                fadeIn(tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)) +
-                    scaleIn(
-                        initialScale = 0.98f,
-                        animationSpec = tween(MotionSpec.SCREEN, easing = MotionSpec.Enter)
-                    )
-            },
+            popEnterTransition = { fadeIn(tween(MotionSpec.SMALL, easing = MotionSpec.Enter)) },
             popExitTransition = { fadeOut(tween(90, easing = MotionSpec.Exit)) }
         ) {
             composable(ROUTE_HOME) {

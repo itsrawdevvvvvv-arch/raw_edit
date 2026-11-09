@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -27,6 +28,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.rawedit.app.ui.components.MonoLabel
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.theme.Ink
 import com.rawedit.app.util.Fmt
@@ -60,9 +62,12 @@ fun ResultScreen(
         onDispose { player.release() }
     }
 
+    val topInset = rememberTopInset()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = topInset)
+            .navigationBarsPadding()
             .padding(horizontal = 18.dp)
     ) {
         Spacer(Modifier.height(14.dp))

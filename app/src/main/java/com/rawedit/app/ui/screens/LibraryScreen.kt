@@ -28,6 +28,7 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.rawedit.app.data.VideoItem
 import com.rawedit.app.ui.components.EmptyState
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.components.MonoLabel
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.theme.Ink
@@ -44,9 +45,11 @@ fun LibraryScreen(
 ) {
     val context = LocalContext.current
 
+    val topInset = rememberTopInset()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = topInset)
             .padding(horizontal = 18.dp)
     ) {
         Spacer(Modifier.height(14.dp))

@@ -30,6 +30,7 @@ import com.rawedit.app.render.StageHost
 import com.rawedit.app.render.WebStage
 import com.rawedit.app.service.RenderService
 import com.rawedit.app.ui.components.MonoLabel
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.components.ShimmerBar
 import com.rawedit.app.ui.theme.Ink
@@ -59,6 +60,10 @@ fun RenderScreen(
     var startedAt by remember { mutableLongStateOf(0L) }
     var userCancelled by remember { mutableStateOf(false) }
 
+    // The stage is built at the render resolution, so no per-frame downscale is needed.
+    val renderWidth = if (vm.fastMode || vm.lowEndDevice) 1280 else 1920
+    val renderHeight = if (renderWidth == 1920) 1080 else 720
+
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         onDispose {
@@ -86,23 +91,18 @@ fun RenderScreen(
         userCancelled = false
         RenderService.start(context)
 
-        val lowEnd = vm.lowEndDevice
-        val width = when {
-            vm.fastMode -> 1280
-            lowEnd -> 1280
-            else -> 1920
-        }
-        val height = if (width == 1920) 1080 else 720
-        val fps = if (lowEnd) 24 else 30
+        val fps = if (vm.lowEndDevice) 24 else 30
 
         val engine = RenderEngine(
             context = context,
             stage = s,
             audioUri = uri,
             durationMs = vm.audioDurationMs,
-            preferredWidth = width,
-            preferredHeight = height,
-            fps = fps
+            preferredWidth = renderWidth,
+            preferredHeight = renderHeight,
+            fps = fps,
+            stageWidth = renderWidth,
+            stageHeight = renderHeight
         )
 
         var lastNotifAt = 0L
@@ -149,6 +149,7 @@ fun RenderScreen(
     }
 
     // Opaque, full screen: nothing underneath can show through.
+    val topInset = rememberTopInset()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -157,6 +158,7 @@ fun RenderScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(top = topInset)
                 .padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -173,7 +175,7 @@ fun RenderScreen(
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        StageHost(ctx).also { h ->
+                        StageHost(ctx, renderWidth, renderHeight).also { h ->
                             val ws = WebStage(ctx, h.web)
                             ws.prepare()
                             h.lockInput()

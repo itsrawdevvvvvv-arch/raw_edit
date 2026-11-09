@@ -7,10 +7,17 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 
 /**
- * Hosts a WebView laid out at exactly 1920 x 1080 px and scales it down for display.
- * Frame capture always reads the full 1920 x 1080 layout, never the scaled preview.
+ * Hosts a WebView laid out at exactly stageW x stageH px and scales it down for display.
+ * Frame capture always reads the full stage layout, never the scaled preview.
+ *
+ * The stage is created at the render resolution (720p in Fast mode), which removes a
+ * full-size 1080p draw plus a downscale for every single frame.
  */
-class StageHost(context: Context) : FrameLayout(context) {
+class StageHost(
+    context: Context,
+    val stageW: Int = STAGE_W,
+    val stageH: Int = STAGE_H
+) : FrameLayout(context) {
 
     val web: WebView = WebView(context)
 
@@ -18,14 +25,14 @@ class StageHost(context: Context) : FrameLayout(context) {
         setBackgroundColor(0xFF000000.toInt())
         clipChildren = true
         clipToPadding = true
-        addView(web, LayoutParams(STAGE_W, STAGE_H))
+        addView(web, LayoutParams(stageW, stageH))
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         web.measure(
-            MeasureSpec.makeMeasureSpec(STAGE_W, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(STAGE_H, MeasureSpec.EXACTLY)
+            MeasureSpec.makeMeasureSpec(stageW, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(stageH, MeasureSpec.EXACTLY)
         )
         applyScale()
     }
@@ -37,17 +44,17 @@ class StageHost(context: Context) : FrameLayout(context) {
 
     private fun applyScale() {
         if (measuredWidth == 0 || measuredHeight == 0) return
-        val s = minOf(measuredWidth.toFloat() / STAGE_W, measuredHeight.toFloat() / STAGE_H)
+        val s = minOf(measuredWidth.toFloat() / stageW, measuredHeight.toFloat() / stageH)
         web.pivotX = 0f
         web.pivotY = 0f
         web.scaleX = s
         web.scaleY = s
-        web.translationX = (measuredWidth - STAGE_W * s) / 2f
-        web.translationY = (measuredHeight - STAGE_H * s) / 2f
+        web.translationX = (measuredWidth - stageW * s) / 2f
+        web.translationY = (measuredHeight - stageH * s) / 2f
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        web.layout(0, 0, STAGE_W, STAGE_H)
+        web.layout(0, 0, stageW, stageH)
     }
 
     @SuppressLint("ClickableViewAccessibility")

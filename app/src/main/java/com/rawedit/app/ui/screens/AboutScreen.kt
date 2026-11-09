@@ -3,6 +3,7 @@ package com.rawedit.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +23,7 @@ import com.rawedit.app.BuildConfig
 import com.rawedit.app.ui.components.LogoMark
 import com.rawedit.app.ui.components.MonoLabel
 import com.rawedit.app.ui.components.RawCard
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.theme.Ink
 import com.rawedit.app.ui.theme.Mono
 
@@ -33,9 +35,12 @@ fun AboutScreen(
     onProfile: () -> Unit,
     onClearCache: () -> Unit
 ) {
+    val topInset = rememberTopInset()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = topInset)
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 18.dp)
     ) {
@@ -109,7 +114,7 @@ fun AboutScreen(
             color = Ink.Muted,
             fontSize = 11.sp
         )
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(56.dp))
     }
 }
 

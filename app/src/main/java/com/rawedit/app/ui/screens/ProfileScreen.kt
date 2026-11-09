@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +33,7 @@ import com.rawedit.app.data.Prefs
 import com.rawedit.app.ui.components.MonoLabel
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.components.RawCard
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.theme.Ink
 import com.rawedit.app.ui.theme.Mono
 import java.io.File
@@ -60,9 +62,12 @@ fun ProfileScreen(
         }
     }
 
+    val topInset = rememberTopInset()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(top = topInset)
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 18.dp)
     ) {

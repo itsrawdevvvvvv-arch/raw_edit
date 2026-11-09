@@ -50,6 +50,7 @@ import com.rawedit.app.data.Layer
 import com.rawedit.app.render.StageHost
 import com.rawedit.app.render.WebStage
 import com.rawedit.app.ui.components.MonoLabel
+import com.rawedit.app.ui.components.rememberTopInset
 import com.rawedit.app.ui.components.PillButton
 import com.rawedit.app.ui.theme.Ink
 import com.rawedit.app.ui.theme.Mono
@@ -133,6 +134,8 @@ fun EditorScreen(vm: CreateViewModel, onBack: () -> Unit, onDone: () -> Unit) {
     LaunchedEffect(vm.layersJson) {
         val s = stage ?: return@LaunchedEffect
         val json = vm.layersJson ?: return@LaunchedEffect
+        // debounce: a drag emits many updates, and each one is a JS round trip
+        delay(60)
         s.writeLayers(json)
         s.seek(time.toDouble())
         vm.saveDraft()
@@ -156,7 +159,8 @@ fun EditorScreen(vm: CreateViewModel, onBack: () -> Unit, onDone: () -> Unit) {
 
     val selected = vm.layers.firstOrNull { it.id == selectedId }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+    val topInset = rememberTopInset()
+    Column(Modifier.fillMaxSize().padding(top = topInset).padding(horizontal = 14.dp)) {
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             RoundIcon(Icons.Rounded.ArrowBack, "Back") {

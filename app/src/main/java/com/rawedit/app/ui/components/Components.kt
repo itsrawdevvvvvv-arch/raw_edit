@@ -32,7 +32,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Shader
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -205,17 +210,7 @@ fun NavBottomSpacer(extra: Dp = 0.dp) {
 
 @Composable
 fun ShimmerBar(progress: Float, modifier: Modifier = Modifier) {
-    val motion = rememberMotionEnabled()
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val shift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shift"
-    )
+    // Static fill only: an infinite animation here redraws every frame during a render.
     Canvas(
         modifier
             .fillMaxWidth()
@@ -223,23 +218,27 @@ fun ShimmerBar(progress: Float, modifier: Modifier = Modifier) {
             .clip(CircleShape)
             .background(Ink.Pill)
     ) {
-        val w = size.width
         val p = progress.coerceIn(0f, 1f)
         drawRect(
             color = Color.White,
             topLeft = Offset(0f, 0f),
-            size = Size(w * p, size.height)
+            size = Size(size.width * p, size.height)
         )
-        if (motion && p > 0.01f && p < 0.99f) {
-            val bandW = w * 0.18f
-            val x = (w + bandW) * shift - bandW
-            drawRect(
-                color = Color.White.copy(alpha = 0.28f),
-                topLeft = Offset(x.coerceAtMost(w * p - 2f), 0f),
-                size = Size(bandW.coerceAtMost(w * p).coerceAtLeast(0f), size.height)
-            )
-        }
     }
+}
+
+/** Space so a fixed bottom button clears the floating nav pill and the gesture bar. */
+@Composable
+fun NavPillClearance(extra: Dp = 0.dp) {
+    val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    Spacer(Modifier.height(84.dp + inset + extra))
+}
+
+/** Top inset, with a floor for devices that report zero under edge-to-edge. */
+@Composable
+fun rememberTopInset(): Dp {
+    val inset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    return if (inset < 8.dp) 28.dp else inset
 }
 
 @Composable
@@ -269,19 +268,24 @@ fun LogoMark(size: Dp = 34.dp) {
 
 @Composable
 fun DotGrid(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val step = 26.dp.toPx()
-        val dot = 1.2.dp.toPx()
-        var y = 0f
-        while (y < size.height) {
-            var x = 0f
-            while (x < size.width) {
-                drawCircle(Color.White.copy(alpha = 0.05f), radius = dot, center = Offset(x, y))
-                x += step
+    // One tiled shader instead of ~1200 drawCircle calls per scroll frame.
+    Spacer(
+        modifier.drawWithCache {
+            val step = 26.dp.toPx().toInt().coerceAtLeast(2)
+            val dot = 1.3.dp.toPx().coerceAtLeast(1f)
+            val tile = Bitmap.createBitmap(step, step, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(tile)
+            val paint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                color = android.graphics.Color.WHITE
+                alpha = 20
             }
-            y += step
+            canvas.drawCircle(step / 2f, step / 2f, dot, paint)
+            val shader = BitmapShader(tile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+            val brush = ShaderBrush(shader)
+            onDrawBehind { drawRect(brush = brush) }
         }
-    }
+    )
 }
 
 @Composable

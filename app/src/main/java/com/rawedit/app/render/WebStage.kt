@@ -46,8 +46,10 @@ class WebStage(private val context: Context, private val web: WebView) {
         s.javaScriptEnabled = true
         s.allowFileAccess = false
         s.allowContentAccess = false
-        s.domStorageEnabled = false
-        s.databaseEnabled = false
+        s.domStorageEnabled = true
+        s.databaseEnabled = true
+        s.useWideViewPort = true
+        s.loadWithOverviewMode = true
         s.setGeolocationEnabled(false)
         s.blockNetworkLoads = true
         s.blockNetworkImage = true
