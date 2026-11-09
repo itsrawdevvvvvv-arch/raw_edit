@@ -85,3 +85,23 @@ compressed audio through a MediaCodec decoder, and raw PCM has no decoder on man
 
 The error message is now "Pick the audio again, or convert it to MP3" rather than implying the
 format was wrong.
+
+## 1.3.2 - the 96% freeze
+
+Symptom: capture, seek and H.264 encoding all worked (the preview showed a real frame),
+then "Muxing audio 96%" never moved.
+
+Cause: `Mp4Combine.readSample()` read a sample from the extractor but never called
+`MediaExtractor.advance()`. The merge loop compared the same two timestamps forever, so it
+re-wrote the same sample to the muxer until the disk filled. A textbook infinite loop.
+
+Fix: the merge loop now reads a sample, records its size and time, writes it, then advances
+and reads the next. Both tracks are interleaved by presentation time as before. A hard
+180 second timeout wraps the mux, and if audio is missing or unusable it falls back to a
+video-only file instead of failing.
+
+## 1.3.1 - diagnostics
+
+Render log (`filesDir/render_log.txt`) with a Share log button on the error screen, a self
+test that renders a bundled three-layer page through the full pipeline, and a fail-fast
+check when the first three captured frames come back black.
